@@ -4,113 +4,139 @@ from PIL import Image
 from io import BytesIO
 import time
 import os
+import json
+import base64
 import psutil
-import sys
+from typing import Dict, Any, Optional
 
-# 頁面配置
+# 页面配置
 st.set_page_config(
-    page_title="Flux AI - Koyeb CPU",
+    page_title="Flux AI on Koyeb CPU",
     page_icon="🚀",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Koyeb 專用 CSS
+# Koyeb 优化的 CSS
 st.markdown("""
 <style>
 .koyeb-header {
-    background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%);
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%);
     padding: 2rem;
-    border-radius: 10px;
+    border-radius: 15px;
     color: white;
     text-align: center;
     margin-bottom: 2rem;
+    box-shadow: 0 8px 32px rgba(37, 99, 235, 0.3);
 }
 
-.resource-monitor {
+.resource-card {
     background: #f8fafc;
     padding: 1rem;
-    border-radius: 8px;
+    border-radius: 10px;
     border-left: 4px solid #2563eb;
     margin: 1rem 0;
 }
 
-.koyeb-stats {
-    position: fixed;
-    top: 70px;
-    right: 20px;
-    background: rgba(255,255,255,0.95);
-    padding: 10px;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+.api-status {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
     font-size: 0.8rem;
-    z-index: 1000;
+    font-weight: bold;
+    margin: 0.25rem;
+    display: inline-block;
 }
 
-.api-card {
-    background: white;
-    padding: 1rem;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    margin: 0.5rem 0;
+.status-success { background: #dcfce7; color: #166534; }
+.status-warning { background: #fef3c7; color: #92400e; }
+.status-error { background: #fee2e2; color: #991b1b; }
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# API 服務配置
+# API 服务配置
 API_SERVICES = {
-    "Hugging Face Inference": {
-        "endpoint": "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
-        "free_quota": "1000 請求/月",
-        "avg_time": "10-20秒",
-        "quality": "高品質"
+    "Black Forest Labs": {
+        "endpoint": "https://api.bfl.ml/v1/flux-pro-1.1",
+        "model": "flux-pro-1.1",
+        "free_quota": "$1 免费额度",
+        "avg_time": "15-30秒",
+        "quality": "最高品质",
+        "cost_per_image": "$0.05"
     },
-    "FAL.AI": {
-        "endpoint": "https://fal.run/fal-ai/flux/schnell", 
-        "free_quota": "50 張/月",
-        "avg_time": "5-10秒",
-        "quality": "高品質"
+    "Hugging Face": {
+        "endpoint": "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+        "model": "FLUX.1-schnell",
+        "free_quota": "1000次/月",
+        "avg_time": "10-20秒", 
+        "quality": "高品质",
+        "cost_per_image": "免费"
     },
     "Replicate": {
         "model": "black-forest-labs/flux-schnell",
-        "free_quota": "有限試用",
-        "avg_time": "15-30秒", 
-        "quality": "最高品質"
+        "free_quota": "$1 免费额度",
+        "avg_time": "20-40秒",
+        "quality": "高品质",
+        "cost_per_image": "$0.003"
+    },
+    "Demo Mode": {
+        "endpoint": "placeholder",
+        "free_quota": "无限制",
+        "avg_time": "即时",
+        "quality": "演示品质",
+        "cost_per_image": "$0.00"
     }
 }
 
-def get_system_info():
-    """獲取 Koyeb 系統資源信息"""
+def get_system_metrics() -> Dict[str, Any]:
+    """获取系统资源使用情况"""
     try:
         # CPU 使用率
         cpu_percent = psutil.cpu_percent(interval=1)
+        cpu_count = psutil.cpu_count()
         
-        # 內存使用
+        # 内存信息
         memory = psutil.virtual_memory()
         memory_used_mb = memory.used / (1024**2)
         memory_total_mb = memory.total / (1024**2)
         memory_percent = memory.percent
         
-        # 磁盤使用
+        # 磁盘信息
         disk = psutil.disk_usage('/')
         disk_used_gb = disk.used / (1024**3)
         disk_total_gb = disk.total / (1024**3)
+        disk_percent = (disk.used / disk.total) * 100
         
         return {
-            "cpu_percent": cpu_percent,
-            "memory_used": memory_used_mb,
-            "memory_total": memory_total_mb,
-            "memory_percent": memory_percent,
-            "disk_used": disk_used_gb,
-            "disk_total": disk_total_gb,
-            "python_version": sys.version.split()[0]
+            "cpu": {
+                "percent": cpu_percent,
+                "count": cpu_count
+            },
+            "memory": {
+                "used_mb": memory_used_mb,
+                "total_mb": memory_total_mb,
+                "percent": memory_percent
+            },
+            "disk": {
+                "used_gb": disk_used_gb,
+                "total_gb": disk_total_gb,
+                "percent": disk_percent
+            }
         }
     except Exception as e:
         return {"error": str(e)}
 
-def call_huggingface_api(prompt, hf_token):
-    """調用 Hugging Face Inference API"""
+def call_huggingface_api(prompt: str, token: str) -> Dict[str, Any]:
+    """调用 Hugging Face Inference API"""
+    url = API_SERVICES["Hugging Face"]["endpoint"]
     headers = {
-        "Authorization": f"Bearer {hf_token}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
     
@@ -118,351 +144,551 @@ def call_huggingface_api(prompt, hf_token):
         "inputs": prompt,
         "parameters": {
             "guidance_scale": 0.0,
-            "num_inference_steps": 4
+            "num_inference_steps": 4,
+            "max_sequence_length": 512
         }
     }
     
     try:
-        response = requests.post(
-            API_SERVICES["Hugging Face Inference"]["endpoint"],
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
         
         if response.status_code == 200:
-            image = Image.open(BytesIO(response.content))
-            return {"status": "success", "image": image, "service": "Hugging Face"}
+            return {
+                "success": True,
+                "data": response.content,
+                "service": "Hugging Face",
+                "model": "FLUX.1-schnell"
+            }
+        elif response.status_code == 503:
+            return {
+                "success": False, 
+                "error": "模型正在加载中，请稍后重试",
+                "retry_after": 30
+            }
         else:
-            return {"status": "error", "message": f"HTTP {response.status_code}: {response.text}"}
+            return {
+                "success": False,
+                "error": f"API 错误 {response.status_code}: {response.text}"
+            }
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "请求超时，请重试"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"success": False, "error": str(e)}
 
-def call_replicate_api(prompt, replicate_token):
-    """調用 Replicate API"""
+def call_replicate_api(prompt: str, token: str) -> Dict[str, Any]:
+    """调用 Replicate API"""
     try:
         import replicate
         
-        os.environ["REPLICATE_API_TOKEN"] = replicate_token
+        # 设置 API token
+        os.environ["REPLICATE_API_TOKEN"] = token
         
         output = replicate.run(
-            "black-forest-labs/flux-schnell",
+            API_SERVICES["Replicate"]["model"],
             input={
                 "prompt": prompt,
                 "num_outputs": 1,
                 "aspect_ratio": "1:1",
                 "output_format": "webp",
-                "output_quality": 80
+                "output_quality": 90
             }
         )
         
-        # 下載圖像
-        image_url = output[0] if isinstance(output, list) else output
-        response = requests.get(image_url, timeout=30)
-        image = Image.open(BytesIO(response.content))
+        # 下载图像
+        if isinstance(output, list) and output:
+            image_url = output[0]
+        else:
+            image_url = output
+            
+        response = requests.get(image_url, timeout=60)
         
-        return {"status": "success", "image": image, "service": "Replicate"}
+        return {
+            "success": True,
+            "data": response.content,
+            "service": "Replicate",
+            "model": "flux-schnell"
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"success": False, "error": str(e)}
 
-def simulate_demo_generation(prompt):
-    """演示模式 - 生成佔位符圖像"""
+def call_bfl_api(prompt: str, token: str) -> Dict[str, Any]:
+    """调用 Black Forest Labs 官方 API"""
+    url = "https://api.bfl.ml/v1/flux-pro-1.1"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "prompt": prompt,
+        "width": 1024,
+        "height": 1024,
+        "prompt_upsampling": False,
+        "seed": None,
+        "safety_tolerance": 2
+    }
+    
     try:
-        # 創建帶有提示詞的佔位符圖像
-        placeholder_text = prompt[:30] + "..." if len(prompt) > 30 else prompt
-        placeholder_url = f"https://via.placeholder.com/512x512/2563eb/ffffff?text={placeholder_text.replace(' ', '+')}"
+        # 提交任务
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
-        response = requests.get(placeholder_url, timeout=10)
-        image = Image.open(BytesIO(response.content))
-        
-        return {"status": "success", "image": image, "service": "Demo"}
+        if response.status_code == 200:
+            task_data = response.json()
+            task_id = task_data["id"]
+            
+            # 轮询结果
+            result_url = f"https://api.bfl.ml/v1/get_result?id={task_id}"
+            
+            max_attempts = 60  # 最多等待5分钟
+            for attempt in range(max_attempts):
+                time.sleep(5)  # 每5秒检查一次
+                
+                result_response = requests.get(result_url, headers=headers, timeout=30)
+                
+                if result_response.status_code == 200:
+                    result_data = result_response.json()
+                    
+                    if result_data["status"] == "Ready":
+                        # 下载图像
+                        image_url = result_data["result"]["sample"]
+                        image_response = requests.get(image_url, timeout=60)
+                        
+                        return {
+                            "success": True,
+                            "data": image_response.content,
+                            "service": "Black Forest Labs",
+                            "model": "flux-pro-1.1"
+                        }
+                    elif result_data["status"] == "Error":
+                        return {
+                            "success": False,
+                            "error": f"生成失败: {result_data.get('error', '未知错误')}"
+                        }
+            
+            return {"success": False, "error": "生成超时"}
+        else:
+            return {"success": False, "error": f"API 错误: {response.status_code}"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"success": False, "error": str(e)}
+
+def create_demo_image(prompt: str) -> Dict[str, Any]:
+    """创建演示图像"""
+    try:
+        # 创建带文字的占位符图像
+        text = prompt[:30].replace(" ", "+")
+        demo_url = f"https://via.placeholder.com/512x512/2563eb/ffffff?text=Demo:+{text}"
+        
+        response = requests.get(demo_url, timeout=15)
+        
+        if response.status_code == 200:
+            return {
+                "success": True,
+                "data": response.content,
+                "service": "Demo Mode",
+                "model": "placeholder"
+            }
+        else:
+            return {"success": False, "error": "无法创建演示图像"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def main():
-    # 主標題
+    # 主标题
     st.markdown("""
     <div class="koyeb-header">
         <h1>🚀 Flux AI on Koyeb CPU</h1>
-        <p>高性能 CPU 實例 | 自動縮放 | 全球部署</p>
+        <p>高性能 CPU 实例 | 自动缩放 | Scale-to-Zero</p>
+        <div style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.9;">
+            支持多种 API 服务 | 免费额度优化 | 全球部署
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # 系統資源監控
-    system_info = get_system_info()
+    # 获取系统资源信息
+    metrics = get_system_metrics()
     
-    if "error" not in system_info:
-        st.markdown(f"""
-        <div class="koyeb-stats">
-            <strong>🖥️ Koyeb 實例狀態</strong><br>
-            CPU: {system_info['cpu_percent']:.1f}%<br>
-            RAM: {system_info['memory_used']:.0f}MB / {system_info['memory_total']:.0f}MB<br>
-            磁盤: {system_info['disk_used']:.1f}GB / {system_info['disk_total']:.1f}GB<br>
-            Python: {system_info['python_version']}
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # 側邊欄配置
+    # 侧边栏配置
     with st.sidebar:
         st.header("⚙️ Koyeb 配置")
         
-        # 實例信息
-        st.markdown("""
-        <div class="resource-monitor">
-            <h4>📊 當前實例</h4>
-            <p><strong>類型:</strong> Free / Nano</p>
-            <p><strong>vCPU:</strong> 0.1 - 0.25</p>
-            <p><strong>RAM:</strong> 256-512MB</p>
-            <p><strong>磁盤:</strong> 2-5GB SSD</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # API 服務選擇
-        st.subheader("🔌 API 服務")
-        
-        selected_service = st.selectbox(
-            "選擇生成服務:",
-            ["演示模式"] + list(API_SERVICES.keys())
-        )
-        
-        if selected_service != "演示模式":
-            # API Token 輸入
-            api_token = st.text_input(
-                f"{selected_service} API Token:",
-                type="password",
-                help="請在官網獲取免費 API Token"
-            )
-            
-            # 服務信息
-            if selected_service in API_SERVICES:
-                service_info = API_SERVICES[selected_service]
-                st.info(f"""
-                **{selected_service}**
-                - 免費額度: {service_info['free_quota']}
-                - 平均耗時: {service_info['avg_time']}
-                - 圖像品質: {service_info['quality']}
-                """)
-        else:
-            api_token = None
-            st.info("""
-            **演示模式**
-            - 無 API 成本
-            - 即時響應
-            - 佔位符圖像
-            - 適合測試部署
-            """)
+        # 显示系统资源
+        if "error" not in metrics:
+            st.markdown(f"""
+            <div class="resource-card">
+                <h4>📊 实例资源</h4>
+                <div class="metrics-grid">
+                    <div><strong>CPU:</strong> {metrics['cpu']['percent']:.1f}%</div>
+                    <div><strong>内存:</strong> {metrics['memory']['percent']:.1f}%</div>
+                    <div><strong>磁盘:</strong> {metrics['disk']['percent']:.1f}%</div>
+                </div>
+                <div style="font-size: 0.8rem; color: #6b7280; margin-top: 0.5rem;">
+                    RAM: {metrics['memory']['used_mb']:.0f}MB / {metrics['memory']['total_mb']:.0f}MB<br>
+                    存储: {metrics['disk']['used_gb']:.1f}GB / {metrics['disk']['total_gb']:.1f}GB
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
         
         st.divider()
         
-        # 優化設置
-        st.subheader("🎛️ 性能優化")
+        # API 服务选择
+        st.subheader("🔌 API 服务")
         
-        enable_cache = st.checkbox("啟用結果緩存", value=True, help="減少重複 API 調用")
-        compress_images = st.checkbox("壓縮圖像", value=True, help="減少內存使用")
-        batch_processing = st.checkbox("批次處理", value=False, help="適合多個請求")
+        selected_service = st.selectbox(
+            "选择生成服务:",
+            list(API_SERVICES.keys()),
+            help="不同服务有不同的成本和质量特点"
+        )
         
-        # 成本追蹤
-        st.subheader("💰 成本追蹤")
-        st.metric("Koyeb 費用", "$0.00", "免費額度")
-        st.metric("API 成本", "變動", "依使用量")
-        st.metric("總運行時間", "24/7", "不休眠")
+        # 显示服务信息
+        service_info = API_SERVICES[selected_service]
         
-        # 部署信息
-        st.subheader("📍 部署信息")
-        st.write("**區域**: 自動選擇")
-        st.write("**縮放**: 自動")
-        st.write("**SSL**: 自動")
-        st.write("**域名**: .koyeb.app")
+        # 状态指示器
+        status_class = "status-success" if selected_service == "Demo Mode" else "status-warning"
+        
+        st.markdown(f"""
+        <div class="resource-card">
+            <h4>{selected_service}</h4>
+            <div class="api-status {status_class}">
+                {service_info['free_quota']}
+            </div>
+            <div style="margin-top: 0.5rem; font-size: 0.9rem;">
+                <strong>响应时间:</strong> {service_info['avg_time']}<br>
+                <strong>图像质量:</strong> {service_info['quality']}<br>
+                <strong>单张成本:</strong> {service_info['cost_per_image']}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # API Token 输入
+        if selected_service != "Demo Mode":
+            api_token = st.text_input(
+                f"{selected_service} API Token:",
+                type="password",
+                help="从官方网站获取免费 API Token",
+                placeholder="输入您的 API Token..."
+            )
+        else:
+            api_token = None
+        
+        st.divider()
+        
+        # 生成设置
+        st.subheader("🎨 生成设置")
+        
+        # 图像参数
+        col1, col2 = st.columns(2)
+        with col1:
+            image_width = st.selectbox("宽度", [512, 768, 1024], index=2)
+        with col2:
+            image_height = st.selectbox("高度", [512, 768, 1024], index=2)
+        
+        image_quality = st.select_slider(
+            "质量级别:",
+            ["快速", "标准", "高质量"],
+            value="标准"
+        )
+        
+        # 高级选项
+        with st.expander("🔧 高级选项"):
+            enable_upscaling = st.checkbox("启用提示词优化", value=True)
+            safety_tolerance = st.slider("安全级别", 1, 5, 2)
+            retry_failed = st.checkbox("失败自动重试", value=True)
+        
+        st.divider()
+        
+        # Koyeb 优势说明
+        st.subheader("🚀 Koyeb 优势")
+        st.markdown("""
+        **Scale-to-Zero:**
+        - 闲置时自动缩减到零
+        - 请求时快速启动 (200ms)
+        - 大幅降低运行成本
+        
+        **全球部署:**
+        - 50+ 个地区可选
+        - 自动 CDN 加速
+        - 就近用户访问
+        
+        **开发友好:**
+        - Git 驱动部署
+        - 自动 HTTPS/SSL
+        - 内建负载均衡
+        """)
     
     # 主界面
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📝 AI 圖像生成")
+        st.subheader("🎨 AI 图像生成")
         
-        # 提示詞輸入
+        # 提示词输入区域
         prompt = st.text_area(
-            "輸入提示詞:",
-            placeholder="A beautiful mountain landscape with a serene lake",
-            height=100,
-            help="描述您想要生成的圖像內容"
+            "输入提示词 (支持中英文):",
+            height=120,
+            placeholder="例如：A majestic dragon flying over ancient mountains during sunset, highly detailed, fantasy art style",
+            help="详细的描述能获得更好的生成效果"
         )
         
-        # 快速提示詞模板
-        quick_prompts = {
-            "自然風景": "A serene mountain landscape with a crystal clear lake reflecting the sky",
-            "現代建築": "Modern glass skyscraper with sleek geometric design against blue sky", 
-            "抽象藝術": "Abstract geometric patterns with vibrant colors and flowing lines",
-            "科技風格": "Futuristic digital interface with holographic elements and neon lights",
-            "簡約設計": "Minimalist design with clean lines and neutral color palette"
+        # 快速提示词模板
+        st.subheader("💡 快速模板")
+        
+        template_categories = {
+            "自然风景": [
+                "A serene mountain landscape with crystal clear lake reflecting the sky",
+                "Dense ancient forest with sunlight filtering through tall trees", 
+                "Spectacular sunset over rolling hills with wildflowers"
+            ],
+            "艺术创作": [
+                "Abstract geometric composition with vibrant colors and flowing lines",
+                "Minimalist design with clean shapes and negative space",
+                "Surreal digital art with impossible architecture and floating elements"
+            ],
+            "科幻未来": [
+                "Futuristic cityscape with flying vehicles and neon-lit skyscrapers",
+                "Advanced space station orbiting a distant planet with nebula background",
+                "Cyberpunk street scene with holographic advertisements and rain"
+            ],
+            "人物肖像": [
+                "Professional headshot with soft natural lighting and neutral background",
+                "Artistic portrait with dramatic lighting and creative composition",
+                "Candid street photography style with urban background bokeh"
+            ]
         }
         
-        selected_template = st.selectbox("或選擇快速模板:", ["自訂"] + list(quick_prompts.keys()))
+        selected_category = st.selectbox("选择类别:", list(template_categories.keys()))
+        selected_template = st.selectbox(
+            "选择具体模板:",
+            ["自定义"] + template_categories[selected_category]
+        )
         
-        if selected_template != "自訂":
-            prompt = quick_prompts[selected_template]
+        if selected_template != "自定义":
+            prompt = selected_template
         
-        # 生成控制
+        # 提示词优化建议
+        if prompt and enable_upscaling:
+            quality_keywords = ", highly detailed, professional quality, 8k resolution"
+            if quality_keywords not in prompt:
+                optimized_prompt = prompt + quality_keywords
+                with st.expander("📈 优化后的提示词"):
+                    st.code(optimized_prompt)
+                    if st.button("使用优化版本"):
+                        prompt = optimized_prompt
+                        st.rerun()
+        
+        # 生成控制面板
         col_gen1, col_gen2, col_gen3 = st.columns([2, 1, 1])
         
         with col_gen1:
             generate_btn = st.button(
-                "🎨 生成圖像",
+                f"🚀 使用 {selected_service} 生成",
                 type="primary",
                 use_container_width=True,
                 disabled=not prompt.strip()
             )
         
         with col_gen2:
-            if st.button("🎲 隨機", use_container_width=True):
+            if st.button("🎲 随机", use_container_width=True):
                 import random
-                prompt = random.choice(list(quick_prompts.values()))
+                all_templates = [t for templates in template_categories.values() for t in templates]
+                prompt = random.choice(all_templates)
                 st.rerun()
         
         with col_gen3:
-            if selected_service == "演示模式":
-                est_time = "即時"
-            elif selected_service in API_SERVICES:
-                est_time = API_SERVICES[selected_service]["avg_time"]
-            else:
-                est_time = "10-30秒"
-            
-            st.metric("預估時間", est_time)
+            est_cost = API_SERVICES[selected_service]['cost_per_image']
+            st.metric("预估成本", est_cost)
         
-        # 圖像生成邏輯
+        # 图像生成主逻辑
         if generate_btn and prompt.strip():
-            # 檢查 API Token (演示模式除外)
-            if selected_service != "演示模式" and not api_token:
-                st.error(f"請輸入 {selected_service} 的 API Token")
+            # 验证 API Token
+            if selected_service != "Demo Mode" and not api_token:
+                st.error(f"请输入 {selected_service} 的 API Token")
+                st.info("💡 您可以先使用演示模式测试应用功能")
             else:
-                with st.spinner(f"使用 {selected_service} 生成中..."):
+                with st.spinner(f"🎨 使用 {selected_service} 生成图像中..."):
+                    # 显示进度信息
+                    progress_placeholder = st.empty()
+                    progress_placeholder.info(f"⏳ 预计等待时间: {service_info['avg_time']}")
+                    
                     start_time = time.time()
                     
-                    # 調用相應的生成服務
-                    if selected_service == "演示模式":
-                        result = simulate_demo_generation(prompt)
-                    elif selected_service == "Hugging Face Inference":
-                        result = call_huggingface_api(prompt, api_token)
-                    elif selected_service == "Replicate":
-                        result = call_replicate_api(prompt, api_token)
-                    else:
-                        result = {"status": "error", "message": "服務暫未實現"}
-                    
-                    generation_time = time.time() - start_time
-                    
-                    if result["status"] == "success":
-                        st.success(f"✅ 生成成功！耗時: {generation_time:.1f}秒")
+                    # 调用相应的 API
+                    try:
+                        if selected_service == "Hugging Face":
+                            result = call_huggingface_api(prompt, api_token)
+                        elif selected_service == "Replicate":
+                            result = call_replicate_api(prompt, api_token)
+                        elif selected_service == "Black Forest Labs":
+                            result = call_bfl_api(prompt, api_token)
+                        else:  # Demo Mode
+                            result = create_demo_image(prompt)
                         
-                        # 顯示圖像
-                        image = result["image"]
+                        generation_time = time.time() - start_time
+                        progress_placeholder.empty()
                         
-                        # 圖像壓縮 (如果啟用)
-                        if compress_images and selected_service != "演示模式":
-                            # 壓縮圖像以節省內存
-                            image = image.resize((512, 512), Image.Resampling.LANCZOS)
-                        
-                        st.image(
-                            image,
-                            caption=f"提示詞: {prompt} | 服務: {result.get('service', selected_service)}",
-                            use_column_width=True
-                        )
-                        
-                        # 下載功能
-                        img_buffer = BytesIO()
-                        image.save(img_buffer, format="PNG", optimize=True)
-                        img_buffer.seek(0)
-                        
-                        st.download_button(
-                            "📥 下載圖像",
-                            data=img_buffer,
-                            file_name=f"flux_koyeb_{int(time.time())}.png",
-                            mime="image/png"
-                        )
-                        
-                        # 緩存結果 (如果啟用)
-                        if enable_cache:
-                            if 'generated_cache' not in st.session_state:
-                                st.session_state.generated_cache = []
+                        if result["success"]:
+                            st.success(f"✅ 生成成功！耗时: {generation_time:.1f}秒")
                             
-                            st.session_state.generated_cache.append({
-                                'prompt': prompt,
-                                'service': selected_service,
-                                'time': time.strftime('%H:%M:%S'),
-                                'generation_time': f"{generation_time:.1f}s"
-                            })
+                            # 处理图像数据
+                            try:
+                                image = Image.open(BytesIO(result["data"]))
+                                
+                                # 显示图像
+                                st.image(
+                                    image,
+                                    caption=f"🎨 {prompt} | 服务: {result['service']} | 模型: {result['model']}",
+                                    use_column_width=True
+                                )
+                                
+                                # 图像信息
+                                col_info1, col_info2, col_info3 = st.columns(3)
+                                with col_info1:
+                                    st.metric("图像尺寸", f"{image.width}×{image.height}")
+                                with col_info2:
+                                    st.metric("文件格式", image.format or "PNG")
+                                with col_info3:
+                                    file_size = len(result["data"]) / 1024
+                                    st.metric("文件大小", f"{file_size:.1f}KB")
+                                
+                                # 下载选项
+                                col_dl1, col_dl2 = st.columns(2)
+                                
+                                with col_dl1:
+                                    # PNG 下载
+                                    png_buffer = BytesIO()
+                                    image.save(png_buffer, format="PNG", optimize=True)
+                                    st.download_button(
+                                        "📥 下载 PNG",
+                                        data=png_buffer.getvalue(),
+                                        file_name=f"flux_{int(time.time())}.png",
+                                        mime="image/png",
+                                        use_container_width=True
+                                    )
+                                
+                                with col_dl2:
+                                    # JPEG 下载 (更小文件)
+                                    jpeg_buffer = BytesIO()
+                                    rgb_image = image.convert("RGB")
+                                    rgb_image.save(jpeg_buffer, format="JPEG", quality=90, optimize=True)
+                                    st.download_button(
+                                        "📥 下载 JPEG",
+                                        data=jpeg_buffer.getvalue(),
+                                        file_name=f"flux_{int(time.time())}.jpg",
+                                        mime="image/jpeg",
+                                        use_container_width=True
+                                    )
+                                
+                                # 保存到会话历史
+                                if 'generation_history' not in st.session_state:
+                                    st.session_state.generation_history = []
+                                
+                                st.session_state.generation_history.append({
+                                    'prompt': prompt,
+                                    'service': result['service'],
+                                    'model': result['model'],
+                                    'timestamp': time.strftime('%H:%M:%S'),
+                                    'generation_time': f"{generation_time:.1f}s",
+                                    'cost': API_SERVICES[selected_service]['cost_per_image']
+                                })
+                                
+                                # 限制历史记录数量
+                                if len(st.session_state.generation_history) > 10:
+                                    st.session_state.generation_history.pop(0)
                             
-                            # 限制緩存大小
-                            if len(st.session_state.generated_cache) > 5:
-                                st.session_state.generated_cache.pop(0)
-                    
-                    else:
-                        st.error(f"❌ 生成失敗: {result['message']}")
+                            except Exception as img_error:
+                                st.error(f"❌ 图像处理失败: {img_error}")
                         
-                        # 提供解決方案
-                        st.info("""
-                        **可能的解決方案:**
-                        - 檢查 API Token 是否正確
-                        - 嘗試切換演示模式測試
-                        - 確認網絡連接正常
-                        - 聯繫 API 服務提供商
-                        """)
+                        else:
+                            st.error(f"❌ 生成失败: {result['error']}")
+                            
+                            # 自动重试逻辑
+                            if retry_failed and "retry_after" in result:
+                                st.info(f"🔄 将在 {result['retry_after']} 秒后自动重试...")
+                                time.sleep(result['retry_after'])
+                                st.rerun()
+                            
+                            # 错误解决建议
+                            st.info("""
+                            **可能的解决方案:**
+                            - 检查 API Token 是否正确且有效
+                            - 尝试切换到其他 API 服务
+                            - 简化提示词内容
+                            - 使用演示模式测试功能
+                            """)
+                    
+                    except Exception as e:
+                        progress_placeholder.empty()
+                        st.error(f"❌ 请求处理异常: {str(e)}")
     
     with col2:
-        st.subheader("💡 Koyeb 優勢")
+        st.subheader("📊 实时状态")
         
-        st.markdown("""
-        **🚀 Koyeb 特色:**
-        - 全球 50+ 地區部署
-        - 自動縮放 & Scale-to-Zero  
-        - 內建負載均衡
-        - 自動 HTTPS & SSL
-        - Git 驅動部署
-        
-        **💰 成本優化:**
-        - 免費實例: $0.00/月
-        - 按需付費: $0.0036/小時起
-        - 無閒置費用 (Scale-to-Zero)
-        - 無基礎設施管理
-        
-        **📈 性能監控:**
-        """)
-        
-        # 顯示當前系統狀態
-        if "error" not in system_info:
-            col_cpu, col_mem = st.columns(2)
-            with col_cpu:
-                st.metric("CPU 使用", f"{system_info['cpu_percent']:.1f}%")
-            with col_mem:
-                st.metric("內存使用", f"{system_info['memory_percent']:.1f}%")
-        
-        # 生成歷史 (如果有緩存)
-        if 'generated_cache' in st.session_state and st.session_state.generated_cache:
-            st.subheader("📚 生成歷史")
+        # 当前系统状态
+        if "error" not in metrics:
+            st.markdown(f"""
+            **🖥️ CPU 使用率**
+            ```
+            {metrics['cpu']['percent']:.1f}% ({metrics['cpu']['count']} 核心)
+            ```
             
-            for i, item in enumerate(reversed(st.session_state.generated_cache)):
-                with st.expander(f"記錄 {i+1} - {item['time']}"):
-                    st.write(f"**提示詞**: {item['prompt'][:50]}...")
-                    st.write(f"**服務**: {item['service']}")
-                    st.write(f"**耗時**: {item['generation_time']}")
+            **💾 内存使用**
+            ```
+            {metrics['memory']['used_mb']:.0f}MB / {metrics['memory']['total_mb']:.0f}MB
+            ({metrics['memory']['percent']:.1f}%)
+            ```
+            
+            **💿 磁盘使用**
+            ```
+            {metrics['disk']['used_gb']:.1f}GB / {metrics['disk']['total_gb']:.1f}GB
+            ({metrics['disk']['percent']:.1f}%)
+            ```
+            """)
         
-        # 部署指南
-        st.subheader("🛠️ 部署指南")
+        # API 服务状态
+        st.subheader("🌐 API 服务状态")
+        for service_name, info in API_SERVICES.items():
+            if service_name == selected_service:
+                status_indicator = "🟢 当前使用"
+            elif service_name == "Demo Mode":
+                status_indicator = "🟢 始终可用"
+            else:
+                status_indicator = "🟡 需要 Token"
+            
+            st.write(f"**{service_name}**: {status_indicator}")
         
-        with st.expander("📖 快速部署"):
-            st.code("""
-# 1. 推送代碼到 GitHub
-git init
-git add .
-git commit -m "Flux AI Koyeb"
-git push origin main
-
-# 2. 在 Koyeb 控制台
-# - 點擊 "Create Service"
-# - 選擇 GitHub 倉庫
-# - 選擇 CPU 實例類型
-# - 設置環境變量
-# - 點擊 Deploy
-            """, language="bash")
+        # 生成历史
+        if 'generation_history' in st.session_state and st.session_state.generation_history:
+            st.subheader("📚 生成历史")
+            
+            for i, record in enumerate(reversed(st.session_state.generation_history[-5:])):
+                with st.expander(f"记录 {i+1} - {record['timestamp']}"):
+                    st.write(f"**提示词**: {record['prompt'][:50]}...")
+                    st.write(f"**服务**: {record['service']}")
+                    st.write(f"**耗时**: {record['generation_time']}")
+                    st.write(f"**成本**: {record['cost']}")
+            
+            if st.button("🗑️ 清空历史"):
+                st.session_state.generation_history = []
+                st.rerun()
+        
+        # 使用统计
+        st.subheader("📈 使用统计")
+        total_generations = len(st.session_state.get('generation_history', []))
+        st.metric("总生成次数", total_generations)
+        
+        if total_generations > 0:
+            avg_time = sum(float(r['generation_time'].replace('s', '')) 
+                          for r in st.session_state.generation_history) / total_generations
+            st.metric("平均耗时", f"{avg_time:.1f}s")
+        
+        # 部署信息
+        st.subheader("🚀 部署信息")
+        st.info(f"""
+        **平台**: Koyeb CPU 实例
+        **区域**: 自动选择最优
+        **缩放**: Scale-to-Zero 已启用
+        **SSL**: 自动配置
+        **状态**: ✅ 运行正常
+        """)
 
 if __name__ == "__main__":
     main()
