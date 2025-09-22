@@ -1,43 +1,48 @@
-# 使用稳定的 Python 3.11 版本
+# 使用官方 Python 3.11 基础镜像
 FROM python:3.11-slim
 
+# 设置工作目录
 WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# 升级 pip 和构建工具
+# 升级 pip
 RUN pip install --upgrade pip setuptools wheel
 
-# 复制依赖文件
+# 复制并安装 Python 依赖
 COPY requirements.txt .
-
-# 分步安装依赖，避免构建错误
-RUN pip install --no-cache-dir streamlit==1.28.1
-RUN pip install --no-cache-dir requests==2.31.0
-RUN pip install --no-cache-dir pillow==10.0.1
-RUN pip install --no-cache-dir psutil==5.9.0
-
-# 安装可选依赖
-RUN pip install --no-cache-dir replicate==0.25.0 || echo "Replicate installation failed, skipping..."
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY app.py .
 
-# 设置环境变量
-ENV STREAMLIT_SERVER_HEADLESS=true
-ENV STREAMLIT_SERVER_PORT=8000
-ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
-ENV PYTHONPATH=/app
+# 设置 Streamlit 环境变量
+ENV STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_SERVER_PORT=8000 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+# 创建非 root 用户
+RUN useradd --create-home --shell /bin/bash app \
+    && chown -R app:app /app
+USER app
 
 # 暴露端口
 EXPOSE 8000
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/_stcore/health || exit 1
 
 # 启动命令
