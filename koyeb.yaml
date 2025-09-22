@@ -1,0 +1,29 @@
+name: flux-ai-cpu
+type: web
+env:
+  - name: STREAMLIT_SERVER_HEADLESS
+    value: "true"
+  - name: STREAMLIT_SERVER_PORT
+    value: "8000"
+instances:
+  - type: free
+    regions: [fra, was]
+scaling:
+  min: 0  # Enable Scale-to-Zero
+  max: 3
+  targets:
+    - type: cpu
+      value: "70"
+    - type: memory
+      value: "80"
+ports:
+  - port: 8000
+    protocol: http
+health_check:
+  http:
+    path: /_stcore/health
+    port: 8000
+    interval: 30s
+    timeout: 30s
+    healthy_threshold: 2
+    unhealthy_threshold: 3
