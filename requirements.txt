@@ -1,16 +1,9 @@
-# === PyTorch CPU 版本 ===
-torch==2.8.0+cpu --index-url https://download.pytorch.org/whl/cpu
-torchvision==0.23.0+cpu --index-url https://download.pytorch.org/whl/cpu
-
-# === 輕量級 Streamlit 應用 ===
+# === 应用依赖 (不含PyTorch) ===
 streamlit==1.28.1
 requests==2.31.0
 pillow==10.0.1
-
-# === API 調用工具 ===
 replicate==0.25.0
 openai==1.12.0
 httpx==0.27.0
-
-# === 系統監控 ===
 psutil==5.9.0
+numpy==1.24.3
