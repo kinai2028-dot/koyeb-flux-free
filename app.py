@@ -15,6 +15,17 @@ import zipfile
 import psutil
 import os
 
+# 檢查 Streamlit 版本並定義重新運行函數
+def rerun_app():
+    """兼容不同 Streamlit 版本的重新運行函數"""
+    if hasattr(st, 'rerun'):
+        st.rerun()
+    elif hasattr(st, 'experimental_rerun'):
+        st.experimental_rerun()
+    else:
+        # 作為最後的回退
+        st.stop()
+
 # 設定頁面配置
 st.set_page_config(
     page_title="Flux AI 圖像生成器 Pro - Koyeb Edition",
@@ -328,13 +339,13 @@ def show_model_status_dashboard():
                 )
                 st.session_state.last_test_time = datetime.datetime.now()
             st.success("✅ 批量測試完成！")
-            st.rerun()
+            rerun_app()
         else:
             st.error("❌ 請先配置 API 密鑰")
     
     # 刷新狀態
     if refresh_btn:
-        st.rerun()
+        rerun_app()
     
     # 清除緩存
     if clear_cache_btn:
@@ -342,7 +353,7 @@ def show_model_status_dashboard():
         if 'last_test_time' in st.session_state:
             del st.session_state.last_test_time
         st.success("緩存已清除")
-        st.rerun()
+        rerun_app()
     
     # 顯示測試結果
     if st.session_state.model_test_results:
@@ -437,7 +448,7 @@ def show_model_status_dashboard():
                                     config['api_key'], config['base_url'], custom_prompt
                                 )
                                 st.session_state.model_test_results[model_name] = test_result
-                            st.rerun()
+                            rerun_app()
                         else:
                             st.error("請先配置 API 密鑰")
     
@@ -492,7 +503,7 @@ def show_model_recommendations():
         if st.button("🚀 使用推薦的最佳模型"):
             st.session_state.recommended_model = recommended[0]
             st.success(f"已選擇: {FLUX_MODELS.get(recommended[0], {}).get('name', recommended[0])}")
-            st.rerun()
+            rerun_app()
     else:
         st.info("請先測試模型可用性以獲取推薦")
 
@@ -575,7 +586,7 @@ def show_api_settings():
             st.success("✅ API 設置已保存")
             # 清除舊的模型測試結果
             st.session_state.model_test_results = {}
-            st.rerun()
+            rerun_app()
     
     if test_btn:
         test_api_key = api_key_input if api_key_input else current_key
@@ -602,7 +613,7 @@ def show_api_settings():
         }
         st.session_state.model_test_results = {}
         st.success("🗑️ API 設置已清除")
-        st.rerun()
+        rerun_app()
     
     # 顯示當前狀態
     if st.session_state.api_config['api_key']:
@@ -767,7 +778,7 @@ def display_image_with_actions(image_url: str, image_id: str, history_item: Dict
                     }
                     st.session_state.favorite_images.append(favorite_item)
                     st.success("已加入收藏")
-                st.rerun()
+                rerun_app()
         
         with col3:
             if history_item and st.button(
@@ -778,7 +789,7 @@ def display_image_with_actions(image_url: str, image_id: str, history_item: Dict
                 st.session_state.regenerate_prompt = history_item['prompt']
                 st.session_state.regenerate_model = history_item['model']
                 st.session_state.current_page = "生成器"
-                st.rerun()
+                rerun_app()
     
     except Exception as e:
         st.error(f"圖像顯示錯誤: {str(e)}")
@@ -1046,7 +1057,7 @@ with tab1:
                         help=quick_prompt
                     ):
                         st.session_state.quick_prompt = quick_prompt
-                        st.rerun()
+                        rerun_app()
             
             if hasattr(st.session_state, 'quick_prompt'):
                 prompt = st.session_state.quick_prompt
