@@ -1,4 +1,3 @@
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=koyeb-flux-free&type=git&repository=kinai2028-dot%2Fkoyeb-flux-free&branch=main&run_command=streamlit+run+app.py+--server.port%3D%24PORT+--server.address%3D0.0.0.0+--server.headless%3Dtrue&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300)
 Flux AI & Stable Diffusion Generator Pro - 項目介紹
 項目概述
 這是一個基於 Streamlit 構建的專業級 AI 圖像生成平台，整合了 Flux AI 和 Stable Diffusion 兩大主流生成模型。該項目專為 Koyeb 雲平台優化，支持 Scale-to-Zero 自動縮放，提供企業級的 API 密鑰管理和模型自動發現功能。
@@ -123,4 +122,5 @@ Koyeb 平台特色
 
 📱 移動應用: 原生移動端體驗
 
-這個項目代表了 AI 圖像生成領域的技術前沿，為用戶提供了一個功能完整、安全可靠、易於使用的專業平台。無論是個人創作還是企業應用，都能在這裡找到合適的解決方案。
+這個項目代表了 AI 圖像生成領域的技術前沿，為用戶提供了一個功能完整、安全可靠、易於使用的專業平台。無論是個人創作還是企業應用，都能在這裡找到合適的解決方案。 
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=koyeb-flux-free&type=git&repository=kinai2028-dot%2Fkoyeb-flux-free&branch=main&run_command=streamlit+run+app.py+--server.port%3D%24PORT+--server.address%3D0.0.0.0+--server.headless%3Dtrue&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300)
