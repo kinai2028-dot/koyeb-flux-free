@@ -1,0 +1,1 @@
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?name=koyeb-flux-free&type=git&repository=kinai2028-dot%2Fkoyeb-flux-free&branch=main&run_command=streamlit+run+app.py+--server.port%3D%24PORT+--server.address%3D0.0.0.0+--server.headless%3Dtrue&instance_type=free&regions=was&instances_min=0&autoscaling_sleep_idle_delay=300)
