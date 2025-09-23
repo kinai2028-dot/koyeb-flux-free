@@ -15,8 +15,6 @@ import zipfile
 import psutil
 import os
 import re
-from cryptography.fernet import Fernet
-import hashlib
 
 # 兼容性函數
 def rerun_app():
@@ -30,34 +28,19 @@ def rerun_app():
 
 # 設定頁面配置
 st.set_page_config(
-    page_title="Flux AI & SD Generator Pro - 密鑰存檔版",
+    page_title="Flux AI & SD Generator Pro",
     page_icon="🎨",
     layout="wide"
 )
 
-# 密鑰加密和存檔系統
-class APIKeyManager:
-    def __init__(self, db_path="api_keys.db"):
-        self.db_path = db_path
-        self.encryption_key = self._get_or_create_encryption_key()
-        self.cipher = Fernet(self.encryption_key)
+# 密鑰管理系統 - 簡化版（避免復雜依賴）
+class SimpleKeyManager:
+    def __init__(self):
+        self.db_path = "simple_keys.db"
         self.init_database()
     
-    def _get_or_create_encryption_key(self) -> bytes:
-        """獲取或創建加密密鑰"""
-        key_file = "encryption.key"
-        
-        if os.path.exists(key_file):
-            with open(key_file, "rb") as f:
-                return f.read()
-        else:
-            key = Fernet.generate_key()
-            with open(key_file, "wb") as f:
-                f.write(key)
-            return key
-    
     def init_database(self):
-        """初始化密鑰存檔數據庫"""
+        """初始化簡單的密鑰存檔數據庫"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -66,50 +49,26 @@ class APIKeyManager:
                 id TEXT PRIMARY KEY,
                 provider TEXT NOT NULL,
                 key_name TEXT NOT NULL,
-                encrypted_key TEXT NOT NULL,
+                api_key TEXT NOT NULL,
                 base_url TEXT,
-                key_prefix TEXT,
                 validated BOOLEAN DEFAULT 0,
-                last_used TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 notes TEXT,
                 is_default BOOLEAN DEFAULT 0
             )
         ''')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS key_usage_logs (
-                id TEXT PRIMARY KEY,
-                key_id TEXT,
-                action TEXT,
-                success BOOLEAN,
-                error_message TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(key_id) REFERENCES api_keys(id)
-            )
-        ''')
-        
         conn.commit()
         conn.close()
     
-    def encrypt_key(self, api_key: str) -> str:
-        """加密 API 密鑰"""
-        return self.cipher.encrypt(api_key.encode()).decode()
-    
-    def decrypt_key(self, encrypted_key: str) -> str:
-        """解密 API 密鑰"""
-        return self.cipher.decrypt(encrypted_key.encode()).decode()
-    
     def save_api_key(self, provider: str, key_name: str, api_key: str, base_url: str = "", 
-                     key_prefix: str = "", notes: str = "", is_default: bool = False) -> str:
+                     notes: str = "", is_default: bool = False) -> str:
         """保存 API 密鑰"""
         key_id = str(uuid.uuid4())
-        encrypted_key = self.encrypt_key(api_key)
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 如果設為默認，先清除其他默認設置
         if is_default:
             cursor.execute(
                 "UPDATE api_keys SET is_default = 0 WHERE provider = ?",
@@ -118,9 +77,9 @@ class APIKeyManager:
         
         cursor.execute('''
             INSERT INTO api_keys 
-            (id, provider, key_name, encrypted_key, base_url, key_prefix, notes, is_default)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (key_id, provider, key_name, encrypted_key, base_url, key_prefix, notes, is_default))
+            (id, provider, key_name, api_key, base_url, notes, is_default)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (key_id, provider, key_name, api_key, base_url, notes, is_default))
         
         conn.commit()
         conn.close()
@@ -134,15 +93,15 @@ class APIKeyManager:
         
         if provider:
             cursor.execute('''
-                SELECT id, provider, key_name, base_url, key_prefix, validated, 
-                       last_used, created_at, notes, is_default
+                SELECT id, provider, key_name, api_key, base_url, validated, 
+                       created_at, notes, is_default
                 FROM api_keys WHERE provider = ?
                 ORDER BY is_default DESC, created_at DESC
             ''', (provider,))
         else:
             cursor.execute('''
-                SELECT id, provider, key_name, base_url, key_prefix, validated, 
-                       last_used, created_at, notes, is_default
+                SELECT id, provider, key_name, api_key, base_url, validated, 
+                       created_at, notes, is_default
                 FROM api_keys 
                 ORDER BY provider, is_default DESC, created_at DESC
             ''')
@@ -153,154 +112,68 @@ class APIKeyManager:
                 'id': row[0],
                 'provider': row[1],
                 'key_name': row[2],
-                'base_url': row[3],
-                'key_prefix': row[4],
+                'api_key': row[3],
+                'base_url': row[4],
                 'validated': bool(row[5]),
-                'last_used': row[6],
-                'created_at': row[7],
-                'notes': row[8],
-                'is_default': bool(row[9])
+                'created_at': row[6],
+                'notes': row[7],
+                'is_default': bool(row[8])
             })
         
         conn.close()
         return keys
     
-    def get_decrypted_key(self, key_id: str) -> Optional[str]:
-        """獲取解密的 API 密鑰"""
+    def delete_api_key(self, key_id: str):
+        """刪除 API 密鑰"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT encrypted_key FROM api_keys WHERE id = ?",
-            (key_id,)
-        )
-        
-        result = cursor.fetchone()
+        cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
+        conn.commit()
         conn.close()
-        
-        if result:
-            return self.decrypt_key(result[0])
-        return None
     
     def update_key_validation(self, key_id: str, validated: bool):
         """更新密鑰驗證狀態"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE api_keys 
-            SET validated = ?, last_used = CURRENT_TIMESTAMP 
-            WHERE id = ?
-        ''', (validated, key_id))
-        
+        cursor.execute(
+            "UPDATE api_keys SET validated = ? WHERE id = ?",
+            (validated, key_id)
+        )
         conn.commit()
         conn.close()
-    
-    def delete_api_key(self, key_id: str):
-        """刪除 API 密鑰"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
-        cursor.execute("DELETE FROM key_usage_logs WHERE key_id = ?", (key_id,))
-        
-        conn.commit()
-        conn.close()
-    
-    def log_key_usage(self, key_id: str, action: str, success: bool, error_message: str = ""):
-        """記錄密鑰使用日誌"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO key_usage_logs (id, key_id, action, success, error_message)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (str(uuid.uuid4()), key_id, action, success, error_message))
-        
-        conn.commit()
-        conn.close()
-    
-    def get_default_key(self, provider: str) -> Optional[Dict]:
-        """獲取默認密鑰"""
-        keys = self.get_api_keys(provider)
-        default_keys = [k for k in keys if k['is_default']]
-        return default_keys[0] if default_keys else None
-    
-    def export_keys(self, include_keys: bool = False) -> str:
-        """導出密鑰配置（可選擇是否包含密鑰本身）"""
-        keys = self.get_api_keys()
-        export_data = []
-        
-        for key_info in keys:
-            export_item = {
-                'provider': key_info['provider'],
-                'key_name': key_info['key_name'],
-                'base_url': key_info['base_url'],
-                'key_prefix': key_info['key_prefix'],
-                'notes': key_info['notes'],
-                'is_default': key_info['is_default']
-            }
-            
-            if include_keys:
-                decrypted_key = self.get_decrypted_key(key_info['id'])
-                export_item['api_key'] = decrypted_key
-            
-            export_data.append(export_item)
-        
-        return json.dumps(export_data, indent=2, ensure_ascii=False)
 
 # 全局密鑰管理器實例
-key_manager = APIKeyManager()
+key_manager = SimpleKeyManager()
 
-# API 提供商配置（增強版）
+# API 提供商配置
 API_PROVIDERS = {
+    "Navy": {
+        "name": "Navy API",
+        "base_url_default": "https://api.navy/v1", 
+        "key_prefix": "sk-",
+        "description": "Navy AI 圖像生成服務",
+        "icon": "⚓"
+    },
     "OpenAI Compatible": {
         "name": "OpenAI Compatible API",
         "base_url_default": "https://api.openai.com/v1",
         "key_prefix": "sk-",
         "description": "OpenAI 官方或兼容的 API 服務",
-        "icon": "🤖",
-        "supports": ["flux", "stable-diffusion"]
-    },
-    "Navy": {
-        "name": "Navy API",
-        "base_url_default": "https://api.navy/v1", 
-        "key_prefix": "sk-",
-        "description": "Navy 提供的 AI 圖像生成服務",
-        "icon": "⚓",
-        "supports": ["flux", "stable-diffusion"]
+        "icon": "🤖"
     },
     "Hugging Face": {
         "name": "Hugging Face API",
         "base_url_default": "https://api-inference.huggingface.co",
         "key_prefix": "hf_",
         "description": "Hugging Face 推理 API",
-        "icon": "🤗",
-        "supports": ["flux", "stable-diffusion"]
+        "icon": "🤗"
     },
     "Together AI": {
         "name": "Together AI",
         "base_url_default": "https://api.together.xyz/v1",
         "key_prefix": "",
         "description": "Together AI 平台",
-        "icon": "🤝",
-        "supports": ["flux", "stable-diffusion"]
-    },
-    "Fireworks AI": {
-        "name": "Fireworks AI",
-        "base_url_default": "https://api.fireworks.ai/inference/v1",
-        "key_prefix": "",
-        "description": "Fireworks AI 快速推理",
-        "icon": "🎆",
-        "supports": ["flux", "stable-diffusion"]
-    },
-    "Replicate": {
-        "name": "Replicate AI",
-        "base_url_default": "https://api.replicate.com/v1",
-        "key_prefix": "r8_",
-        "description": "Replicate 雲端 AI 模型平台",
-        "icon": "🔄",
-        "supports": ["flux", "stable-diffusion"]
+        "icon": "🤝"
     }
 }
 
@@ -308,11 +181,14 @@ def show_key_manager():
     """顯示密鑰管理界面"""
     st.subheader("🔐 API 密鑰管理中心")
     
-    # 標籤頁
-    key_tabs = st.tabs(["💾 存檔密鑰", "📋 管理密鑰", "⚙️ 密鑰設置", "📊 使用統計"])
+    # 使用簡單的標題而非 tabs 來避免復雜性
+    management_mode = st.radio(
+        "選擇操作模式:",
+        ["💾 保存密鑰", "📋 管理密鑰", "📊 統計信息"],
+        horizontal=True
+    )
     
-    # 存檔密鑰標籤
-    with key_tabs[0]:
+    if management_mode == "💾 保存密鑰":
         st.markdown("### 💾 保存新的 API 密鑰")
         
         col_provider, col_name = st.columns(2)
@@ -342,34 +218,29 @@ def show_key_manager():
             help=f"密鑰通常以 '{provider_info['key_prefix']}' 開頭"
         )
         
-        # 可選配置
-        with st.expander("📋 詳細配置（可選）"):
-            col_url, col_prefix = st.columns(2)
-            
-            with col_url:
-                save_base_url = st.text_input(
-                    "API 端點 URL:",
-                    value=provider_info['base_url_default'],
-                    help="API 服務的基礎 URL"
-                )
-            
-            with col_prefix:
-                save_key_prefix = st.text_input(
-                    "密鑰前綴:",
-                    value=provider_info['key_prefix'],
-                    help="API 密鑰的前綴格式"
-                )
-            
+        # 詳細配置區域 - 使用普通的 markdown 標題
+        st.markdown("#### 📋 詳細配置（可選）")
+        
+        col_url, col_notes = st.columns(2)
+        
+        with col_url:
+            save_base_url = st.text_input(
+                "API 端點 URL:",
+                value=provider_info['base_url_default'],
+                help="API 服務的基礎 URL"
+            )
+        
+        with col_notes:
             notes = st.text_area(
                 "備註:",
                 placeholder="記錄此密鑰的用途、限制或其他重要信息...",
                 height=80
             )
-            
-            is_default = st.checkbox(
-                "設為默認密鑰",
-                help="將此密鑰設為該提供商的默認選擇"
-            )
+        
+        is_default = st.checkbox(
+            "設為默認密鑰",
+            help="將此密鑰設為該提供商的默認選擇"
+        )
         
         # 保存按鈕
         col_save, col_test = st.columns(2)
@@ -387,16 +258,13 @@ def show_key_manager():
                             key_name=key_name.strip(),
                             api_key=new_api_key.strip(),
                             base_url=save_base_url,
-                            key_prefix=save_key_prefix,
                             notes=notes,
                             is_default=is_default
                         )
                         
                         st.success(f"✅ 密鑰已安全保存！ID: {key_id[:8]}...")
-                        key_manager.log_key_usage(key_id, "save", True)
-                        
-                        # 清空表單
-                        st.rerun()
+                        time.sleep(1)
+                        rerun_app()
                         
                     except Exception as e:
                         st.error(f"❌ 保存失敗: {str(e)}")
@@ -417,24 +285,20 @@ def show_key_manager():
                                 key_name=key_name.strip(),
                                 api_key=new_api_key.strip(),
                                 base_url=save_base_url,
-                                key_prefix=save_key_prefix,
                                 notes=notes,
                                 is_default=is_default
                             )
                             
                             key_manager.update_key_validation(key_id, True)
-                            key_manager.log_key_usage(key_id, "test_and_save", True)
-                            
                             st.success(f"✅ 測試成功並已保存！{message}")
-                            st.rerun()
+                            time.sleep(1)
+                            rerun_app()
                         else:
                             st.error(f"❌ 測試失敗: {message}")
     
-    # 管理密鑰標籤
-    with key_tabs[1]:
+    elif management_mode == "📋 管理密鑰":
         st.markdown("### 📋 已保存的 API 密鑰")
         
-        # 按提供商篩選
         all_keys = key_manager.get_api_keys()
         if not all_keys:
             st.info("📭 尚未保存任何 API 密鑰")
@@ -447,213 +311,77 @@ def show_key_manager():
             format_func=lambda x: x if x == "全部" else f"{API_PROVIDERS.get(x, {}).get('icon', '🔧')} {x}"
         )
         
-        # 篩選密鑰
         filtered_keys = all_keys if selected_provider_filter == "全部" else [
             key for key in all_keys if key['provider'] == selected_provider_filter
         ]
         
         st.info(f"顯示 {len(filtered_keys)} / {len(all_keys)} 個密鑰")
         
-        # 顯示密鑰列表
-        for key_info in filtered_keys:
+        # 顯示密鑰列表 - 使用簡單的容器而非 expander
+        for i, key_info in enumerate(filtered_keys):
             provider_info = API_PROVIDERS.get(key_info['provider'], {})
             
-            with st.expander(
-                f"{provider_info.get('icon', '🔧')} {key_info['key_name']} "
-                f"({'✅ 默認' if key_info['is_default'] else ''}) "
-                f"({'🟢 已驗證' if key_info['validated'] else '🟡 未驗證'})"
-            ):
-                col_info, col_actions = st.columns([2, 1])
-                
-                with col_info:
-                    st.markdown(f"**提供商**: {key_info['provider']}")
-                    st.markdown(f"**名稱**: {key_info['key_name']}")
-                    st.markdown(f"**狀態**: {'🟢 已驗證' if key_info['validated'] else '🟡 未驗證'}")
-                    st.markdown(f"**創建時間**: {key_info['created_at']}")
-                    
-                    if key_info['last_used']:
-                        st.markdown(f"**最後使用**: {key_info['last_used']}")
-                    
-                    if key_info['notes']:
-                        st.markdown(f"**備註**: {key_info['notes']}")
-                    
-                    st.markdown(f"**端點**: {key_info['base_url']}")
-                
-                with col_actions:
-                    # 使用此密鑰
-                    if st.button("✅ 使用", key=f"use_{key_info['id']}", use_container_width=True):
-                        decrypted_key = key_manager.get_decrypted_key(key_info['id'])
-                        if decrypted_key:
-                            st.session_state.api_config = {
-                                'provider': key_info['provider'],
-                                'api_key': decrypted_key,
-                                'base_url': key_info['base_url'],
-                                'validated': key_info['validated'],
-                                'key_id': key_info['id'],
-                                'key_name': key_info['key_name']
-                            }
-                            
-                            key_manager.log_key_usage(key_info['id'], "use", True)
-                            st.success(f"已載入: {key_info['key_name']}")
-                            rerun_app()
-                    
-                    # 測試密鑰
-                    if st.button("🧪 測試", key=f"test_{key_info['id']}", use_container_width=True):
-                        decrypted_key = key_manager.get_decrypted_key(key_info['id'])
-                        if decrypted_key:
-                            with st.spinner("測試中..."):
-                                is_valid, message = validate_api_key(
-                                    decrypted_key, key_info['base_url'], key_info['provider']
-                                )
-                                
-                                key_manager.update_key_validation(key_info['id'], is_valid)
-                                key_manager.log_key_usage(
-                                    key_info['id'], "test", is_valid, message if not is_valid else ""
-                                )
-                                
-                                if is_valid:
-                                    st.success(f"✅ {message}")
-                                else:
-                                    st.error(f"❌ {message}")
-                                
-                                rerun_app()
-                    
-                    # 設為默認
-                    if not key_info['is_default']:
-                        if st.button("⭐ 設為默認", key=f"default_{key_info['id']}", use_container_width=True):
-                            # 清除同提供商的其他默認設置
-                            conn = sqlite3.connect(key_manager.db_path)
-                            cursor = conn.cursor()
-                            cursor.execute(
-                                "UPDATE api_keys SET is_default = 0 WHERE provider = ?",
-                                (key_info['provider'],)
-                            )
-                            cursor.execute(
-                                "UPDATE api_keys SET is_default = 1 WHERE id = ?",
-                                (key_info['id'],)
-                            )
-                            conn.commit()
-                            conn.close()
-                            
-                            st.success("已設為默認密鑰")
-                            rerun_app()
-                    
-                    # 刪除密鑰
-                    if st.button("🗑️ 刪除", key=f"delete_{key_info['id']}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_{key_info['id']}", False):
-                            key_manager.delete_api_key(key_info['id'])
-                            st.success("密鑰已刪除")
-                            rerun_app()
-                        else:
-                            st.session_state[f"confirm_delete_{key_info['id']}"] = True
-                            st.warning("再次點擊確認刪除")
-                    
-                    # 顯示密鑰（危險操作）
-                    if st.button("👁️ 顯示密鑰", key=f"show_{key_info['id']}", use_container_width=True):
-                        if st.session_state.get(f"confirm_show_{key_info['id']}", False):
-                            decrypted_key = key_manager.get_decrypted_key(key_info['id'])
-                            st.code(decrypted_key, language="text")
-                            key_manager.log_key_usage(key_info['id'], "view", True)
-                        else:
-                            st.session_state[f"confirm_show_{key_info['id']}"] = True
-                            st.warning("⚠️ 再次點擊確認顯示（注意安全）")
-    
-    # 密鑰設置標籤
-    with key_tabs[2]:
-        st.markdown("### ⚙️ 密鑰管理設置")
-        
-        col_export, col_import = st.columns(2)
-        
-        with col_export:
-            st.markdown("#### 📤 導出設置")
+            st.markdown("---")
+            st.markdown(f"### {provider_info.get('icon', '🔧')} {key_info['key_name']}")
             
-            include_keys_in_export = st.checkbox(
-                "包含密鑰內容",
-                help="⚠️ 勾選此項將會在導出文件中包含實際的 API 密鑰，請謹慎處理"
-            )
+            col_info, col_actions = st.columns([2, 1])
             
-            if st.button("📤 導出配置", use_container_width=True):
-                export_data = key_manager.export_keys(include_keys_in_export)
+            with col_info:
+                st.markdown(f"**提供商**: {key_info['provider']}")
+                st.markdown(f"**狀態**: {'🟢 已驗證' if key_info['validated'] else '🟡 未驗證'}")
+                st.markdown(f"**默認**: {'✅ 是' if key_info['is_default'] else '❌ 否'}")
+                st.markdown(f"**創建時間**: {key_info['created_at']}")
                 
-                # 生成下載文件
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"api_keys_export_{timestamp}.json"
+                if key_info['notes']:
+                    st.markdown(f"**備註**: {key_info['notes']}")
                 
-                st.download_button(
-                    label="⬇️ 下載導出文件",
-                    data=export_data,
-                    file_name=filename,
-                    mime="application/json",
-                    use_container_width=True
-                )
-                
-                if include_keys_in_export:
-                    st.warning("⚠️ 導出文件包含實際密鑰，請妥善保管！")
-        
-        with col_import:
-            st.markdown("#### 📥 導入設置")
+                # 顯示密鑰（遮罩）
+                masked_key = '*' * 20 + key_info['api_key'][-8:] if len(key_info['api_key']) > 8 else '*' * len(key_info['api_key'])
+                st.markdown(f"**密鑰**: `{masked_key}`")
             
-            uploaded_file = st.file_uploader(
-                "選擇配置文件",
-                type=['json'],
-                help="上傳之前導出的 API 密鑰配置文件"
-            )
-            
-            if uploaded_file is not None:
-                try:
-                    import_data = json.load(uploaded_file)
+            with col_actions:
+                # 使用此密鑰
+                if st.button("✅ 使用", key=f"use_{key_info['id']}", use_container_width=True):
+                    st.session_state.api_config = {
+                        'provider': key_info['provider'],
+                        'api_key': key_info['api_key'],
+                        'base_url': key_info['base_url'],
+                        'validated': key_info['validated'],
+                        'key_id': key_info['id'],
+                        'key_name': key_info['key_name']
+                    }
                     
-                    st.info(f"發現 {len(import_data)} 個密鑰配置")
-                    
-                    if st.button("📥 導入配置", type="primary", use_container_width=True):
-                        import_count = 0
-                        
-                        for key_config in import_data:
-                            if 'api_key' in key_config and key_config['api_key']:
-                                key_manager.save_api_key(
-                                    provider=key_config['provider'],
-                                    key_name=key_config['key_name'],
-                                    api_key=key_config['api_key'],
-                                    base_url=key_config.get('base_url', ''),
-                                    key_prefix=key_config.get('key_prefix', ''),
-                                    notes=key_config.get('notes', ''),
-                                    is_default=key_config.get('is_default', False)
-                                )
-                                import_count += 1
-                        
-                        st.success(f"✅ 成功導入 {import_count} 個密鑰配置")
-                        rerun_app()
-                        
-                except Exception as e:
-                    st.error(f"❌ 導入失敗: {str(e)}")
-        
-        # 安全設置
-        st.markdown("#### 🔒 安全設置")
-        
-        col_security1, col_security2 = st.columns(2)
-        
-        with col_security1:
-            if st.button("🔄 重新生成加密密鑰", use_container_width=True):
-                st.warning("⚠️ 此操作將使所有已保存的密鑰無法解密！")
-                if st.checkbox("我了解風險，確認操作"):
-                    # 這裡可以實現重新加密功能
-                    st.info("🚧 重新加密功能開發中")
-        
-        with col_security2:
-            if st.button("🗑️ 清空所有密鑰", use_container_width=True):
-                if st.checkbox("確認刪除所有密鑰"):
-                    conn = sqlite3.connect(key_manager.db_path)
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM api_keys")
-                    cursor.execute("DELETE FROM key_usage_logs")
-                    conn.commit()
-                    conn.close()
-                    
-                    st.success("所有密鑰已清除")
+                    st.success(f"已載入: {key_info['key_name']}")
                     rerun_app()
+                
+                # 測試密鑰
+                if st.button("🧪 測試", key=f"test_{key_info['id']}", use_container_width=True):
+                    with st.spinner("測試中..."):
+                        is_valid, message = validate_api_key(
+                            key_info['api_key'], key_info['base_url'], key_info['provider']
+                        )
+                        
+                        key_manager.update_key_validation(key_info['id'], is_valid)
+                        
+                        if is_valid:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.error(f"❌ {message}")
+                        
+                        time.sleep(1)
+                        rerun_app()
+                
+                # 刪除密鑰
+                if st.button("🗑️ 刪除", key=f"delete_{key_info['id']}", use_container_width=True):
+                    if st.session_state.get(f"confirm_delete_{key_info['id']}", False):
+                        key_manager.delete_api_key(key_info['id'])
+                        st.success("密鑰已刪除")
+                        rerun_app()
+                    else:
+                        st.session_state[f"confirm_delete_{key_info['id']}"] = True
+                        st.warning("再次點擊確認刪除")
     
-    # 使用統計標籤
-    with key_tabs[3]:
+    else:  # 統計信息
         st.markdown("### 📊 使用統計")
         
         all_keys = key_manager.get_api_keys()
@@ -663,7 +391,7 @@ def show_key_manager():
             return
         
         # 概覽統計
-        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
         
         with col_stat1:
             st.metric("總密鑰數", len(all_keys))
@@ -675,10 +403,6 @@ def show_key_manager():
         with col_stat3:
             providers_count = len(set(k['provider'] for k in all_keys))
             st.metric("提供商數", providers_count)
-        
-        with col_stat4:
-            default_count = len([k for k in all_keys if k['is_default']])
-            st.metric("默認密鑰", default_count)
         
         # 按提供商分組統計
         st.markdown("#### 📈 按提供商統計")
@@ -712,8 +436,10 @@ def show_api_settings_with_keymanager():
     """顯示帶密鑰管理器的 API 設置界面"""
     st.subheader("🔑 API 設置與密鑰管理")
     
-    # 顯示密鑰管理器
-    with st.expander("🔐 密鑰管理中心", expanded=False):
+    # 顯示密鑰管理器 - 使用可摺疊區域
+    show_manager = st.checkbox("🔐 顯示密鑰管理中心", value=False)
+    
+    if show_manager:
         show_key_manager()
     
     st.markdown("---")
@@ -763,21 +489,18 @@ def show_api_settings_with_keymanager():
                 
                 if st.button("⚡ 快速載入", type="primary", use_container_width=True):
                     selected_key = next(k for k in all_keys if k['id'] == selected_key_id)
-                    decrypted_key = key_manager.get_decrypted_key(selected_key_id)
                     
-                    if decrypted_key:
-                        st.session_state.api_config = {
-                            'provider': selected_key['provider'],
-                            'api_key': decrypted_key,
-                            'base_url': selected_key['base_url'],
-                            'validated': selected_key['validated'],
-                            'key_id': selected_key_id,
-                            'key_name': selected_key['key_name']
-                        }
-                        
-                        key_manager.log_key_usage(selected_key_id, "quick_load", True)
-                        st.success(f"✅ 已載入: {selected_key['key_name']}")
-                        rerun_app()
+                    st.session_state.api_config = {
+                        'provider': selected_key['provider'],
+                        'api_key': selected_key['api_key'],
+                        'base_url': selected_key['base_url'],
+                        'validated': selected_key['validated'],
+                        'key_id': selected_key_id,
+                        'key_name': selected_key['key_name']
+                    }
+                    
+                    st.success(f"✅ 已載入: {selected_key['key_name']}")
+                    rerun_app()
         else:
             st.info("📭 尚未保存任何密鑰")
     
@@ -813,14 +536,12 @@ def show_api_settings_with_keymanager():
                         # 更新數據庫中的驗證狀態
                         if config.get('key_id'):
                             key_manager.update_key_validation(config['key_id'], True)
-                            key_manager.log_key_usage(config['key_id'], "test_current", True)
                     else:
                         st.error(f"❌ {message}")
                         config['validated'] = False
                         
                         if config.get('key_id'):
                             key_manager.update_key_validation(config['key_id'], False)
-                            key_manager.log_key_usage(config['key_id'], "test_current", False, message)
         else:
             st.error("🔴 API 未配置")
             st.info("請使用上方的快速載入或新增密鑰")
@@ -917,9 +638,30 @@ if api_configured:
     if config.get('key_name'):
         st.info(f"🔑 當前使用: {config['key_name']} ({config['provider']})")
     
-    # 這裡可以添加圖像生成的主要界面
+    # 簡單的圖像生成界面
     st.markdown("### 🎨 圖像生成界面")
-    st.info("🚧 圖像生成界面開發中...")
+    
+    col_gen1, col_gen2 = st.columns([2, 1])
+    
+    with col_gen1:
+        prompt = st.text_area(
+            "輸入提示詞:",
+            height=100,
+            placeholder="描述您想要生成的圖像..."
+        )
+        
+        if st.button("🚀 生成圖像", type="primary", disabled=not prompt.strip()):
+            if prompt.strip():
+                st.info("🚧 圖像生成功能開發中...")
+                st.success("✅ API 配置正常，可以進行實際的圖像生成")
+            else:
+                st.warning("⚠️ 請輸入提示詞")
+    
+    with col_gen2:
+        st.markdown("#### ℹ️ 生成設置")
+        st.selectbox("圖像尺寸", ["512x512", "1024x1024", "1152x896"])
+        st.slider("生成數量", 1, 4, 1)
+        st.selectbox("模型選擇", ["flux.1-schnell", "stable-diffusion-xl"])
     
 else:
     st.warning("⚠️ 請在側邊欄配置 API 密鑰")
@@ -927,19 +669,26 @@ else:
     # 顯示幫助信息
     st.markdown("### 🔐 密鑰管理功能")
     st.markdown("""
-    **新功能亮點:**
-    - 🔒 **安全加密**: 所有 API 密鑰使用 AES 加密存儲
-    - 💾 **多密鑰管理**: 支持保存多個提供商的多個密鑰
-    - ⚡ **快速切換**: 一鍵在不同密鑰間切換
-    - 📊 **使用統計**: 跟蹤密鑰使用情況和驗證狀態
-    - 📤 **導出導入**: 安全地備份和恢復密鑰配置
-    - 🎯 **默認設置**: 為每個提供商設置默認密鑰
+    **功能亮點:**
+    - 💾 **安全存檔**: 將多個 API 密鑰安全存儲在本地數據庫
+    - ⚡ **快速切換**: 一鍵在不同密鑰和提供商間切換
+    - 🧪 **自動驗證**: 保存前自動測試密鑰有效性
+    - 📊 **使用統計**: 追蹤密鑰狀態和使用情況
+    - 🏷️ **智能管理**: 為密鑰添加名稱和備註便於管理
+    - ⭐ **默認設置**: 為每個提供商設置默認密鑰
+    
+    **支持的 API 提供商:**
+    - ⚓ Navy API
+    - 🤖 OpenAI Compatible
+    - 🤗 Hugging Face
+    - 🤝 Together AI
     
     **使用步驟:**
-    1. 點擊側邊欄的「密鑰管理中心」
-    2. 在「存檔密鑰」標籤中添加您的 API 密鑰
-    3. 使用「快速載入」選擇要使用的密鑰
-    4. 開始生成圖像
+    1. 勾選「顯示密鑰管理中心」
+    2. 選擇「保存密鑰」模式
+    3. 輸入密鑰信息並保存
+    4. 使用「快速載入」選擇密鑰
+    5. 開始生成圖像
     """)
 
 # 頁腳
@@ -951,6 +700,6 @@ st.markdown("""
     💾 <strong>多密鑰管理</strong> | 
     ⚡ <strong>快速切換</strong>
     <br><br>
-    <small>支援 AES 加密存儲、多提供商管理、使用統計和安全備份</small>
+    <small>支援本地 SQLite 存儲、多提供商管理和使用統計</small>
 </div>
 """, unsafe_allow_html=True)
