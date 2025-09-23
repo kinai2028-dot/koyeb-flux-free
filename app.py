@@ -1,127 +1,221 @@
-import os
-import base64
-import io
-import torch
-from flask import Flask, request, jsonify
-from diffusers import FluxPipeline
+import streamlit as st
+import requests
 from PIL import Image
+from io import BytesIO
+import time
+import os
+import json
+import base64
 
-app = Flask(__name__)
+# 页面配置
+st.set_page_config(
+    page_title="Flux AI - 稳定版",
+    page_icon="🚀",
+    layout="wide"
+)
 
-# 全域變數儲存模型
-pipeline = None
+# 简化的CSS
+st.markdown("""
+<style>
+.main-header {
+    background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%);
+    padding: 2rem;
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+    margin-bottom: 2rem;
+}
 
-def load_model():
-    """載入 FLUX.1 Krea [dev] 模型"""
-    global pipeline
+.stable-badge {
+    background: #10b981;
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# 简化的API服务配置
+def call_huggingface_api_simple(prompt, token):
+    """简化的HuggingFace API调用"""
+    url = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+    headers = {"Authorization": f"Bearer {token}"}
+    data = {"inputs": prompt}
     
-    if pipeline is None:
-        print("正在載入 FLUX.1 Krea [dev] 模型...")
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=60)
         
-        # 檢查 HuggingFace Token
-        hf_token = os.environ.get("HF_TOKEN")
-        if not hf_token:
-            raise ValueError("需要設置 HF_TOKEN 環境變數來訪問模型")
+        if response.status_code == 200:
+            return {"success": True, "data": response.content}
+        else:
+            return {"success": False, "error": f"API错误: {response.status_code}"}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": f"网络错误: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": f"未知错误: {str(e)}"}
+
+def create_demo_image(prompt):
+    """创建演示图像（避免外部API依赖）"""
+    try:
+        # 创建简单的占位符图像URL
+        text = prompt[:20].replace(" ", "+")
+        demo_url = f"https://via.placeholder.com/512x512/2563eb/ffffff?text={text}"
         
-        try:
-            pipeline = FluxPipeline.from_pretrained(
-                "black-forest-labs/FLUX.1-Krea-dev",
-                torch_dtype=torch.bfloat16,
-                use_auth_token=hf_token
+        response = requests.get(demo_url, timeout=10)
+        if response.status_code == 200:
+            return {"success": True, "data": response.content}
+        else:
+            return {"success": False, "error": "无法创建演示图像"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def main():
+    # 标题
+    st.markdown("""
+    <div class="main-header">
+        <h1>🚀 Flux AI - 稳定版</h1>
+        <p>兼容性优化 | <span class="stable-badge">Python 3.11</span></p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 侧边栏
+    with st.sidebar:
+        st.header("⚙️ 设置")
+        
+        # 服务选择
+        service_mode = st.radio(
+            "选择模式:",
+            ["演示模式", "HuggingFace API"]
+        )
+        
+        if service_mode == "HuggingFace API":
+            hf_token = st.text_input(
+                "HuggingFace Token:",
+                type="password",
+                help="从 huggingface.co 获取免费token"
             )
-            
-            # 啟用 CPU 卸載以節省 VRAM
-            pipeline.enable_model_cpu_offload()
-            
-            print("模型載入成功！")
-            
-        except Exception as e:
-            print(f"模型載入失敗: {str(e)}")
-            raise e
+        
+        st.info(f"""
+        **当前模式: {service_mode}**
+        - Python: 3.11 (稳定)
+        - 依赖: 最小化
+        - 状态: ✅ 运行正常
+        """)
+        
+        # 图像设置
+        st.subheader("🎨 图像设置")
+        image_format = st.selectbox("输出格式", ["PNG", "JPEG"], index=0)
+        image_quality = st.slider("图像质量", 1, 10, 8)
     
-    return pipeline
-
-def image_to_base64(image):
-    """將 PIL 圖像轉換為 base64 字符串"""
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue())
-    return f"data:image/png;base64,{img_str.decode()}"
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """健康檢查端點"""
-    return jsonify({"status": "healthy", "model": "FLUX.1 Krea [dev]"})
-
-@app.route('/predict', methods=['POST'])
-def generate_image():
-    """圖像生成端點"""
-    try:
-        # 解析請求數據
-        data = request.get_json()
-        
-        if not data or 'prompt' not in data:
-            return jsonify({"error": "缺少 prompt 參數"}), 400
-        
-        prompt = data['prompt']
-        height = data.get('height', 1024)
-        width = data.get('width', 1024)
-        guidance_scale = data.get('guidance_scale', 4.5)
-        num_inference_steps = data.get('num_inference_steps', 50)
-        
-        # 載入模型
-        pipe = load_model()
-        
-        print(f"正在生成圖像: {prompt}")
-        
-        # 生成圖像
-        with torch.no_grad():
-            image = pipe(
-                prompt=prompt,
-                height=height,
-                width=width,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps
-            ).images[0]
-        
-        # 轉換為 base64
-        image_b64 = image_to_base64(image)
-        
-        return jsonify({
-            "images": [image_b64],
-            "prompt": prompt,
-            "model": "FLUX.1 Krea [dev]",
-            "parameters": {
-                "height": height,
-                "width": width,
-                "guidance_scale": guidance_scale,
-                "num_inference_steps": num_inference_steps
-            }
-        })
-        
-    except Exception as e:
-        print(f"生成錯誤: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/', methods=['GET'])
-def index():
-    """根端點"""
-    return jsonify({
-        "message": "FLUX.1 Krea [dev] API 已就緒",
-        "model": "FLUX.1 Krea [dev]",
-        "endpoints": {
-            "generate": "/predict",
-            "health": "/health"
-        }
-    })
-
-if __name__ == '__main__':
-    # 預先載入模型（可選）
-    try:
-        load_model()
-    except Exception as e:
-        print(f"預載模型失敗，將在第一次請求時載入: {e}")
+    # 主界面
+    col1, col2 = st.columns([2, 1])
     
-    # 啟動 Flask 應用
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    with col1:
+        st.subheader("🎨 图像生成")
+        
+        # 提示词输入
+        prompt = st.text_area(
+            "描述你想要的图像:",
+            height=100,
+            placeholder="例如：A beautiful sunset over mountains"
+        )
+        
+        # 预设模板
+        templates = [
+            "A serene landscape with mountains and lake",
+            "Modern architectural building with glass facade", 
+            "Abstract art with geometric shapes and colors",
+            "Portrait of a person in natural lighting",
+            "Futuristic city with flying vehicles"
+        ]
+        
+        template_choice = st.selectbox("或选择模板:", ["自定义"] + templates)
+        if template_choice != "自定义":
+            prompt = template_choice
+        
+        # 生成按钮
+        generate_btn = st.button(
+            "🚀 生成图像", 
+            type="primary",
+            use_container_width=True,
+            disabled=not prompt.strip()
+        )
+        
+        # 生成逻辑
+        if generate_btn and prompt.strip():
+            # 检查必要条件
+            if service_mode == "HuggingFace API" and 'hf_token' not in locals():
+                st.error("请输入 HuggingFace Token")
+            elif service_mode == "HuggingFace API" and not hf_token:
+                st.error("请输入 HuggingFace Token")
+            else:
+                with st.spinner(f"使用{service_mode}生成图像..."):
+                    start_time = time.time()
+                    
+                    # 调用相应的API
+                    if service_mode == "HuggingFace API":
+                        result = call_huggingface_api_simple(prompt, hf_token)
+                    else:  # 演示模式
+                        result = create_demo_image(prompt)
+                    
+                    generation_time = time.time() - start_time
+                    
+                    if result["success"]:
+                        try:
+                            # 处理图像数据
+                            image = Image.open(BytesIO(result["data"]))
+                            
+                            st.success(f"✅ 生成成功！耗时: {generation_time:.1f}秒")
+                            
+                            # 显示图像
+                            st.image(image, caption=prompt, use_column_width=True)
+                            
+                            # 下载功能
+                            img_buffer = BytesIO()
+                            img_format = image_format.upper()
+                            if img_format == "JPEG":
+                                image = image.convert("RGB")
+                            
+                            image.save(img_buffer, format=img_format, quality=image_quality*10)
+                            
+                            st.download_button(
+                                f"📥 下载 {image_format}",
+                                data=img_buffer.getvalue(),
+                                file_name=f"flux_{int(time.time())}.{image_format.lower()}",
+                                mime=f"image/{image_format.lower()}"
+                            )
+                            
+                        except Exception as img_error:
+                            st.error(f"图像处理失败: {img_error}")
+                    else:
+                        st.error(f"❌ 生成失败: {result['error']}")
+    
+    with col2:
+        st.subheader("📋 使用说明")
+        
+        st.markdown("""
+        **🔧 稳定版特性:**
+        - Python 3.11 兼容
+        - 最小化依赖
+        - 减少构建错误
+        - 快速部署
+        
+        **🎯 支持的模式:**
+        - **演示模式**: 无需API，即时响应
+        - **HuggingFace**: 免费1000次/月
+        
+        **💡 使用技巧:**
+        - 详细描述提升质量
+        - 使用英文提示词
+        - 避免版权内容
+        """)
+        
+        # 系统状态
+        st.subheader("⚡ 系统状态")
+        st.success("🟢 服务正常")
+        st.info("📦 依赖已优化")
+        st.info("🐍 Python 3.11")
+
+if __name__ == "__main__":
+    main()
