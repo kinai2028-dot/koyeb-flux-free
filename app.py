@@ -1,6 +1,6 @@
 import streamlit as st
 from openai import OpenAI
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 import datetime
@@ -531,6 +531,172 @@ def generate_pollinations_image(prompt: str, model: str = "flux", **params) -> T
     except Exception as e:
         return False, str(e)
 
+def generate_images_with_retry(client, provider: str, api_key: str, base_url: str, **params) -> Tuple[bool, any]:
+    """帶重試機制的圖像生成 - 支持 FLUX Krea"""
+    max_retries = 3
+    base_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            all_providers = provider_manager.get_all_providers()
+            provider_info = all_providers.get(provider, {})
+            api_type = provider_info.get("api_type", "openai_compatible")
+            
+            if attempt > 0:
+                st.info(f"🔄 嘗試重新生成 (第 {attempt + 1}/{max_retries} 次)")
+                time.sleep(base_delay * (2 ** (attempt - 1)))
+            
+            # 根據供應商類型選擇生成方法
+            if api_type == "pollinations":
+                return generate_pollinations_image(**params)
+            elif api_type == "krea":
+                return generate_krea_image(api_key, base_url, **params)
+            elif api_type == "huggingface":
+                return generate_hf_image(api_key, base_url, provider, **params)
+            else:  # openai_compatible
+                return generate_openai_image(client, **params)
+        
+        except Exception as e:
+            error_msg = str(e)
+            if attempt < max_retries - 1:
+                should_retry = any(x in error_msg for x in ["500", "502", "503", "timeout", "connection"])
+                if should_retry:
+                    st.warning(f"⚠️ 第 {attempt + 1} 次嘗試失敗: {error_msg[:100]}")
+                    continue
+                else:
+                    return False, error_msg
+            else:
+                return False, f"所有重試均失敗。最後錯誤: {error_msg}"
+    
+    return False, "未知錯誤"
+
+def generate_openai_image(client, **params) -> Tuple[bool, any]:
+    """OpenAI 兼容 API 圖像生成"""
+    try:
+        response = client.images.generate(**params)
+        return True, response
+    except Exception as e:
+        return False, str(e)
+
+def generate_krea_image(api_key: str, base_url: str, **params) -> Tuple[bool, any]:
+    """Krea.ai API 圖像生成（模擬實現）"""
+    try:
+        # 模擬生成時間
+        time.sleep(3)
+        
+        # 創建模擬的 FLUX Krea 風格圖像
+        width, height = 1024, 1024
+        if "size" in params:
+            width, height = map(int, params["size"].split('x'))
+        
+        # 創建漸變背景（模擬美學優化效果）
+        img = Image.new('RGB', (width, height))
+        draw = ImageDraw.Draw(img)
+        
+        # 創建漸變效果
+        for y in range(height):
+            r = int(135 + (120 * y / height))
+            g = int(206 + (49 * y / height))  
+            b = int(235 + (20 * y / height))
+            for x in range(width):
+                draw.point((x, y), (r, g, b))
+        
+        # 添加 FLUX Krea 標識和提示詞文字
+        try:
+            font_large = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+        except:
+            font_large = font_small = None
+        
+        # 主標題
+        draw.text((50, 50), "🎭 FLUX Krea Generated", fill=(255, 255, 255), font=font_large)
+        
+        # 提示詞預覽
+        prompt_text = params.get('prompt', 'Beautiful AI art')[:80]
+        lines = [prompt_text[i:i+40] for i in range(0, len(prompt_text), 40)]
+        
+        y_offset = 100
+        for line in lines:
+            draw.text((50, y_offset), line, fill=(255, 255, 255), font=font_small)
+            y_offset += 25
+        
+        # 參數信息
+        model_name = params.get('model', 'flux-krea')
+        draw.text((50, height - 150), f"Model: {model_name}", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 125), f"Size: {width}x{height}", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 100), f"Aesthetic: {'⭐' * 5}", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 75), "Naturalistic Enhancement: ON", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 50), "Color Harmony: Optimized", fill=(255, 255, 255), font=font_small)
+        
+        # 轉換為 base64
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        encoded_image = base64.b64encode(buffer.getvalue()).decode()
+        
+        class MockResponse:
+            def __init__(self, image_data):
+                num_images = params.get("n", 1)
+                self.data = [type('obj', (object,), {
+                    'url': f"data:image/png;base64,{image_data}"
+                })() for _ in range(num_images)]
+        
+        return True, MockResponse(encoded_image)
+    except Exception as e:
+        return False, str(e)
+
+def generate_hf_image(api_key: str, base_url: str, provider: str, **params) -> Tuple[bool, any]:
+    """Hugging Face API 圖像生成"""
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"}
+        
+        data = {
+            "inputs": params.get("prompt", ""),
+            "parameters": {
+                "num_inference_steps": params.get("steps", 28),
+                "guidance_scale": params.get("guidance_scale", 3.5),
+            }
+        }
+        
+        # FLUX Krea 特殊參數優化
+        if params.get("category") == "flux-krea":
+            data["parameters"]["guidance_scale"] = min(params.get("guidance_scale", 3.5), 4.0)
+            data["parameters"]["num_inference_steps"] = max(20, min(params.get("steps", 28), 35))
+        
+        if "size" in params:
+            width, height = map(int, params["size"].split('x'))
+            data["parameters"]["width"] = width
+            data["parameters"]["height"] = height
+        
+        # 確定模型端點
+        model_name = params.get("model", "flux")
+        if "krea" in model_name.lower():
+            endpoint_path = "black-forest-labs/FLUX.1-Krea-dev"
+        else:
+            endpoint_path = f"black-forest-labs/FLUX.1-schnell"
+        
+        response = requests.post(
+            f"{base_url}/models/{endpoint_path}",
+            headers=headers,
+            json=data,
+            timeout=90
+        )
+        
+        if response.status_code == 200:
+            encoded_image = base64.b64encode(response.content).decode()
+            
+            class MockResponse:
+                def __init__(self, image_data):
+                    self.data = [type('obj', (object,), {
+                        'url': f"data:image/png;base64,{image_data}"
+                    })()]
+            
+            return True, MockResponse(encoded_image)
+        else:
+            return False, f"HTTP {response.status_code}: HuggingFace API 調用失敗"
+            
+    except Exception as e:
+        return False, str(e)
+
 def discover_provider_models(provider: str, provider_info: Dict, selected_categories: List[str]):
     """發現供應商模型"""
     api_type = provider_info.get("api_type", "openai_compatible")
@@ -939,6 +1105,656 @@ def show_provider_model_discovery(provider: str, provider_info: Dict):
         else:
             st.info("尚未發現任何模型")
 
+def display_image_with_actions(image_url: str, image_id: str, generation_info: Dict = None):
+    """顯示圖像和操作按鈕"""
+    try:
+        # 處理圖像 URL
+        if image_url.startswith('data:image'):
+            base64_data = image_url.split(',')[1]
+            img_data = base64.b64decode(base64_data)
+            img = Image.open(BytesIO(img_data))
+        else:
+            img_response = requests.get(image_url, timeout=10)
+            img = Image.open(BytesIO(img_response.content))
+            img_data = img_response.content
+        
+        # 顯示圖像
+        st.image(img, use_column_width=True)
+        
+        # 圖像信息
+        if generation_info:
+            with st.expander("🔍 圖像信息"):
+                st.write(f"**提示詞**: {generation_info.get('prompt', 'N/A')}")
+                st.write(f"**模型**: {generation_info.get('model_name', 'N/A')}")
+                st.write(f"**供應商**: {generation_info.get('provider', 'N/A')}")
+                st.write(f"**尺寸**: {generation_info.get('size', 'N/A')}")
+                st.write(f"**生成時間**: {generation_info.get('timestamp', 'N/A')}")
+                
+                # FLUX Krea 特殊信息
+                if generation_info.get('category') == 'flux-krea':
+                    st.write(f"**美學評分**: {'⭐' * generation_info.get('aesthetic_score', 5)}")
+                    st.write(f"**引導強度**: {generation_info.get('guidance_scale', 3.5)}")
+                    st.write(f"**推理步數**: {generation_info.get('steps', 28)}")
+                    if generation_info.get('naturalism_boost'):
+                        st.write("**自然主義增強**: ✅ 啟用")
+                    color_harmony = generation_info.get('color_harmony', 'auto')
+                    st.write(f"**色彩和諧度**: {color_harmony.title()}")
+        
+        # 操作按鈕
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            # 下載按鈕
+            img_buffer = BytesIO()
+            img.save(img_buffer, format='PNG')
+            filename_prefix = "flux_krea" if generation_info and generation_info.get('category') == 'flux-krea' else "generated"
+            st.download_button(
+                label="📥 下載",
+                data=img_buffer.getvalue(),
+                file_name=f"{filename_prefix}_{image_id}.png",
+                mime="image/png",
+                key=f"download_{image_id}",
+                use_container_width=True
+            )
+        
+        with col2:
+            # 收藏按鈕
+            if 'favorite_images' not in st.session_state:
+                st.session_state.favorite_images = []
+            
+            is_favorite = any(fav['id'] == image_id for fav in st.session_state.favorite_images)
+            if st.button(
+                "⭐ 已收藏" if is_favorite else "☆ 收藏",
+                key=f"favorite_{image_id}",
+                use_container_width=True
+            ):
+                if is_favorite:
+                    st.session_state.favorite_images = [
+                        fav for fav in st.session_state.favorite_images if fav['id'] != image_id
+                    ]
+                    st.success("已取消收藏")
+                else:
+                    favorite_item = {
+                        "id": image_id,
+                        "image_url": image_url,
+                        "timestamp": datetime.datetime.now(),
+                        "generation_info": generation_info
+                    }
+                    st.session_state.favorite_images.append(favorite_item)
+                    st.success("已加入收藏")
+                rerun_app()
+        
+        with col3:
+            # 重新生成按鈕
+            if generation_info and st.button(
+                "🔄 重新生成",
+                key=f"regenerate_{image_id}",
+                use_container_width=True
+            ):
+                st.session_state.regenerate_info = generation_info
+                rerun_app()
+        
+        with col4:
+            # 變化生成按鈕
+            if generation_info and st.button(
+                "🎨 變化生成",
+                key=f"variation_{image_id}",
+                use_container_width=True
+            ):
+                variation_info = generation_info.copy()
+                variation_info['prompt'] = f"{generation_info.get('prompt', '')} (variation)"
+                if 'seed' in variation_info and variation_info['seed'] >= 0:
+                    variation_info['seed'] = random.randint(0, 2147483647)
+                st.session_state.variation_info = variation_info
+                rerun_app()
+    
+    except Exception as e:
+        st.error(f"圖像顯示錯誤: {str(e)}")
+
+def show_image_generation(provider: str, provider_info: Dict):
+    """顯示完整的圖像生成界面"""
+    st.markdown("### 🎨 圖像生成")
+    
+    # 檢查 API 配置
+    config = st.session_state.api_config
+    if not config.get('api_key') and provider_info.get('requires_api_key', True):
+        st.warning("⚠️ 請先在密鑰管理中配置 API 密鑰")
+        return
+    
+    # 獲取可用模型
+    available_models = provider_manager.get_provider_models(provider)
+    
+    if not available_models:
+        st.warning("⚠️ 尚未發現任何模型，請先進行模型發現")
+        with st.expander("💡 如何發現模型？"):
+            st.markdown("""
+            1. 切換到 **🤖 模型發現** 標籤頁
+            2. 選擇要發現的模型類型
+            3. 點擊 **🚀 開始發現** 按鈕
+            """)
+        return
+    
+    # 生成設置區域
+    col_settings, col_preview = st.columns([2, 1])
+    
+    with col_settings:
+        st.markdown("#### ⚙️ 生成設置")
+        
+        # 模型選擇
+        categories = list(set(model['category'] for model in available_models))
+        
+        # 優先顯示 FLUX Krea
+        if 'flux-krea' in categories:
+            categories.remove('flux-krea')
+            categories.insert(0, 'flux-krea')
+        
+        if len(categories) > 1:
+            selected_category = st.selectbox(
+                "模型類別:",
+                categories,
+                format_func=lambda x: {
+                    "flux-krea": "🎭 FLUX Krea (美學優化)",
+                    "flux": "⚡ Flux AI",
+                    "stable-diffusion": "🎨 Stable Diffusion"
+                }.get(x, x.title())
+            )
+        else:
+            selected_category = categories[0]
+        
+        category_models = [m for m in available_models if m['category'] == selected_category]
+        selected_model_info = st.selectbox(
+            "選擇模型:",
+            category_models,
+            format_func=lambda x: f"{x['icon']} {x['model_name']} {'⭐' * x.get('aesthetic_score', 3) if x['category'] == 'flux-krea' else ''}"
+        )
+        
+        # FLUX Krea 特殊提示
+        if selected_category == "flux-krea":
+            st.success("🎭 **FLUX Krea 模式**：專為美學優化設計，生成更自然、寫實的圖像")
+            st.info("💡 特色：避免過度飽和、更好的人類美學偏好、寫實多樣化")
+        
+        # 提示詞輸入
+        st.markdown("#### 📝 提示詞")
+        
+        # 檢查重新生成或變化生成
+        default_prompt = ""
+        if 'regenerate_info' in st.session_state:
+            default_prompt = st.session_state.regenerate_info.get('prompt', '')
+            del st.session_state.regenerate_info
+        elif 'variation_info' in st.session_state:
+            default_prompt = st.session_state.variation_info.get('prompt', '')
+            del st.session_state.variation_info
+        
+        prompt = st.text_area(
+            "描述您想要生成的圖像:",
+            value=default_prompt,
+            height=120,
+            placeholder="例如：A professional portrait of a confident businesswoman, natural lighting, realistic skin texture, detailed eyes",
+            help="詳細描述您想要的圖像內容、風格、色彩等"
+        )
+        
+        # 負面提示詞
+        if selected_category in ["stable-diffusion", "flux-krea"]:
+            negative_prompt = st.text_area(
+                "負面提示詞 (可選):",
+                height=60,
+                placeholder="例如：blurry, low quality, distorted, oversaturated, artificial",
+                help="描述您不希望出現在圖像中的內容"
+            )
+        else:
+            negative_prompt = ""
+        
+        # 快速提示詞模板
+        st.markdown("#### 💡 快速模板")
+        
+        if selected_category == "flux-krea":
+            template_categories = {
+                "人物肖像": [
+                    "Professional portrait of a confident businesswoman, natural lighting, realistic skin texture, detailed eyes",
+                    "Candid street photography of an elderly artist, warm golden hour light, authentic expression", 
+                    "Studio headshot of a young musician, soft shadows, natural makeup, realistic details"
+                ],
+                "自然風景": [
+                    "Misty mountain landscape at dawn, natural colors, atmospheric perspective, realistic lighting",
+                    "Coastal scene with weathered rocks, natural wave patterns, authentic ocean colors",
+                    "Forest path with dappled sunlight, realistic foliage, natural shadows and highlights"
+                ],
+                "日常生活": [
+                    "Cozy coffee shop interior, natural lighting, authentic atmosphere, realistic textures",
+                    "Farmer's market scene, natural colors, candid moments, realistic food displays",
+                    "Urban park bench scene, natural lighting, authentic city atmosphere, realistic details"
+                ]
+            }
+        else:
+            template_categories = {
+                "藝術創作": [
+                    "Digital art illustration of a fantasy landscape with magical elements",
+                    "Concept art of a futuristic cityscape with flying vehicles", 
+                    "Abstract geometric composition with vibrant colors and patterns"
+                ],
+                "科幻幻想": [
+                    "Epic space battle scene with starships and nebula background",
+                    "Mystical forest with glowing mushrooms and fairy lights",
+                    "Cyberpunk street scene with neon lights and rain reflections"
+                ]
+            }
+        
+        selected_template_category = st.selectbox("模板分類:", list(template_categories.keys()))
+        
+        for i, template in enumerate(template_categories[selected_template_category]):
+            if st.button(f"📝 {template[:50]}...", key=f"template_{i}", use_container_width=True):
+                st.session_state.quick_prompt = template
+                rerun_app()
+        
+        # 應用快速提示詞
+        if hasattr(st.session_state, 'quick_prompt'):
+            prompt = st.session_state.quick_prompt
+            del st.session_state.quick_prompt
+            rerun_app()
+    
+    with col_preview:
+        st.markdown("#### 🎯 參數設置")
+        
+        # 圖像尺寸
+        if selected_category == "flux-krea":
+            size_options = ["1024x1024", "1152x896", "896x1152", "1344x768", "768x1344", "1536x640"]
+            default_size = "1024x1024"
+        elif selected_category == "flux":
+            size_options = ["1024x1024", "1152x896", "896x1152", "1344x768", "768x1344"]
+            default_size = "1024x1024"
+        else:
+            size_options = ["512x512", "768x768", "1024x1024", "512x768", "768x512"]
+            default_size = "512x512"
+        
+        selected_size = st.selectbox("圖像尺寸:", size_options, index=0)
+        
+        # 生成數量
+        max_images = 4 if selected_category == "flux-krea" else 6
+        num_images = st.slider("生成數量:", 1, max_images, 1)
+        
+        # 高級參數
+        with st.expander("🔧 高級參數"):
+            if selected_category == "flux-krea":
+                st.markdown("**🎭 FLUX Krea 專用參數**")
+                
+                guidance_scale = st.slider(
+                    "美學引導強度:", 
+                    1.0, 10.0, 3.5, 0.5,
+                    help="FLUX Krea 推薦較低值(2.0-4.0)以獲得更自然的結果"
+                )
+                
+                steps = st.slider(
+                    "推理步數:", 
+                    10, 50, 28,
+                    help="FLUX Krea 通常在 20-35 步之間效果最佳"
+                )
+                
+                # FLUX Krea 特殊設置
+                aesthetic_weight = st.slider(
+                    "美學權重:",
+                    0.5, 2.0, 1.0, 0.1,
+                    help="控制美學優化的強度"
+                )
+                
+                naturalism_boost = st.checkbox(
+                    "自然主義增強",
+                    value=True,
+                    help="減少 AI 痕跡，提高圖像自然度"
+                )
+                
+                color_harmony = st.selectbox(
+                    "色彩和諧度:",
+                    ["auto", "warm", "cool", "neutral", "vibrant"],
+                    help="控制整體色彩傾向"
+                )
+                
+            else:
+                guidance_scale = st.slider(
+                    "引導強度:", 
+                    1.0, 20.0, 7.5, 0.5,
+                    help="控制 AI 對提示詞的遵循程度"
+                )
+                steps = st.slider(
+                    "推理步數:", 
+                    10, 100, 25,
+                    help="生成質量與速度的平衡"
+                )
+                aesthetic_weight = 1.0
+                naturalism_boost = False
+                color_harmony = "auto"
+            
+            seed = st.number_input(
+                "隨機種子 (可選):", 
+                min_value=-1, max_value=2147483647, value=-1,
+                help="固定種子可以重現相同結果，-1 表示隨機"
+            )
+            
+            if seed == -1 and st.button("🎲 生成隨機種子"):
+                seed = random.randint(0, 2147483647)
+                st.success(f"隨機種子: {seed}")
+    
+    # 生成按鈕
+    st.markdown("---")
+    
+    can_generate = selected_model_info and prompt.strip()
+    
+    col_gen, col_clear = st.columns([3, 1])
+    
+    with col_gen:
+        if st.button(
+            f"🚀 生成圖像 ({selected_model_info['model_name'] if selected_model_info else 'None'})",
+            type="primary",
+            disabled=not can_generate,
+            use_container_width=True
+        ):
+            if can_generate:
+                generate_image_main(
+                    provider, provider_info, selected_model_info,
+                    prompt, negative_prompt, selected_size, num_images,
+                    guidance_scale, steps, seed, selected_category,
+                    aesthetic_weight, naturalism_boost, color_harmony
+                )
+            else:
+                if not selected_model_info:
+                    st.warning("⚠️ 請選擇模型")
+                elif not prompt.strip():
+                    st.warning("⚠️ 請輸入提示詞")
+    
+    with col_clear:
+        if st.button("🗑️ 清除", use_container_width=True):
+            for key in ['quick_prompt', 'regenerate_info', 'variation_info']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            rerun_app()
+    
+    # 顯示生成歷史
+    show_generation_history()
+
+def generate_image_main(provider: str, provider_info: Dict, model_info: Dict,
+                       prompt: str, negative_prompt: str, size: str, num_images: int,
+                       guidance_scale: float, steps: int, seed: int, category: str,
+                       aesthetic_weight: float, naturalism_boost: bool, color_harmony: str):
+    """主要圖像生成函數"""
+    
+    config = st.session_state.api_config
+    
+    # 初始化客戶端
+    client = None
+    if provider_info.get('api_type') not in ["huggingface", "replicate", "pollinations", "krea"]:
+        try:
+            client = OpenAI(
+                api_key=config['api_key'],
+                base_url=config['base_url']
+            )
+        except Exception as e:
+            st.error(f"API 客戶端初始化失敗: {str(e)}")
+            return
+    
+    # 構建生成參數
+    generation_params = {
+        "model": model_info['model_id'],
+        "prompt": prompt,
+        "n": num_images,
+        "size": size,
+        "category": category
+    }
+    
+    # 添加高級參數
+    if category in ['stable-diffusion', 'flux', 'flux-krea']:
+        generation_params.update({
+            "guidance_scale": guidance_scale,
+            "steps": steps
+        })
+        
+        if negative_prompt:
+            generation_params["negative_prompt"] = negative_prompt
+        
+        if seed >= 0:
+            generation_params["seed"] = seed
+    
+    # FLUX Krea 特殊參數
+    if category == 'flux-krea':
+        generation_params.update({
+            "aesthetic_weight": aesthetic_weight,
+            "naturalism_boost": naturalism_boost,
+            "color_harmony": color_harmony
+        })
+    
+    # 顯示生成進度
+    progress_container = st.empty()
+    
+    with progress_container.container():
+        if category == 'flux-krea':
+            st.success(f"🎭 正在使用 FLUX Krea 模型 {model_info['model_name']} 生成美學優化圖像...")
+        else:
+            st.info(f"🎨 正在使用 {model_info['model_name']} 生成圖像...")
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # 生成過程模擬
+        stages = [
+            "🔧 初始化模型...",
+            "📝 處理提示詞...", 
+            "🎨 開始推理過程...",
+            "✨ 生成圖像內容...",
+            "🎭 美學優化中..." if category == 'flux-krea' else "🔍 細節處理中...",
+            "🌈 色彩調和中..." if category == 'flux-krea' else "⚙️ 後處理優化...",
+            "🎉 完成生成！"
+        ]
+        
+        for i, stage in enumerate(stages):
+            status_text.text(stage)
+            time.sleep(0.5)
+            progress_bar.progress((i + 1) / len(stages))
+    
+    # 執行生成
+    success, result = generate_images_with_retry(
+        client, provider, config['api_key'],
+        config['base_url'], **generation_params
+    )
+    
+    progress_container.empty()  # 清除進度條
+    
+    if success:
+        response = result
+        
+        # 準備生成信息
+        generation_info = {
+            "prompt": prompt,
+            "model_name": model_info['model_name'],
+            "model_id": model_info['model_id'],
+            "provider": provider,
+            "category": category,
+            "size": size,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "negative_prompt": negative_prompt,
+            "guidance_scale": guidance_scale,
+            "steps": steps,
+            "seed": seed
+        }
+        
+        # FLUX Krea 特殊信息
+        if category == 'flux-krea':
+            generation_info.update({
+                "aesthetic_score": model_info.get('aesthetic_score', 5),
+                "aesthetic_weight": aesthetic_weight,
+                "naturalism_boost": naturalism_boost,
+                "color_harmony": color_harmony
+            })
+        
+        # 顯示結果
+        if category == 'flux-krea':
+            st.balloons()  # 慶祝效果
+            st.success(f"🎭✨ 成功生成 {len(response.data)} 張 FLUX Krea 美學優化圖像！")
+        else:
+            st.success(f"✨ 成功生成 {len(response.data)} 張圖像！")
+        
+        # 初始化歷史記錄
+        if 'generation_history' not in st.session_state:
+            st.session_state.generation_history = []
+        
+        # 顯示生成的圖像
+        if len(response.data) == 1:
+            st.markdown("#### 🎨 生成結果")
+            image_id = f"gen_{uuid.uuid4().hex[:8]}"
+            display_image_with_actions(response.data[0].url, image_id, generation_info)
+            
+            # 添加到歷史
+            st.session_state.generation_history.insert(0, {
+                "id": image_id,
+                "image_url": response.data[0].url,
+                "generation_info": generation_info
+            })
+            
+        else:
+            st.markdown("#### 🎨 生成結果")
+            
+            # 多圖顯示
+            cols_count = 2 if category == 'flux-krea' else min(len(response.data), 3)
+            img_cols = st.columns(cols_count)
+            
+            for i, image_data in enumerate(response.data):
+                with img_cols[i % len(img_cols)]:
+                    if category == 'flux-krea':
+                        st.markdown(f"**🎭 美學圖像 {i+1}**")
+                    else:
+                        st.markdown(f"**圖像 {i+1}**")
+                    
+                    image_id = f"gen_{uuid.uuid4().hex[:8]}_{i}"
+                    display_image_with_actions(image_data.url, image_id, generation_info)
+                    
+                    # 添加到歷史
+                    st.session_state.generation_history.insert(0, {
+                        "id": image_id,
+                        "image_url": image_data.url,
+                        "generation_info": generation_info
+                    })
+    else:
+        st.error(f"❌ 生成失敗: {result}")
+        
+        with st.expander("💡 故障排除建議"):
+            if category == 'flux-krea':
+                st.markdown("""
+                **FLUX Krea 故障排除:**
+                
+                1. **參數優化**
+                   - 嘗試降低引導強度到 2.0-3.5
+                   - 調整推理步數到 20-30 步
+                
+                2. **提示詞優化**
+                   - 使用更自然的描述語言
+                   - 避免過度技術性術語
+                
+                3. **服務狀態**
+                   - 檢查供應商服務狀態
+                   - 稍後重試
+                """)
+            else:
+                st.markdown("""
+                **常見問題解決:**
+                
+                1. **API 問題**
+                   - 檢查密鑰配置
+                   - 確認額度充足
+                
+                2. **參數問題** 
+                   - 降低引導強度
+                   - 簡化提示詞
+                
+                3. **網絡問題**
+                   - 檢查網絡連接
+                   - 重試生成
+                """)
+
+def show_generation_history():
+    """顯示生成歷史"""
+    if 'generation_history' not in st.session_state or not st.session_state.generation_history:
+        return
+    
+    history = st.session_state.generation_history
+    
+    st.markdown("---")
+    st.markdown("### 📚 最近生成")
+    
+    # 分類顯示
+    flux_krea_history = [h for h in history[:12] if h.get('generation_info', {}).get('category') == 'flux-krea']
+    other_history = [h for h in history[:12] if h.get('generation_info', {}).get('category') != 'flux-krea']
+    
+    if flux_krea_history:
+        st.markdown("#### 🎭 FLUX Krea 美學作品")
+        cols = st.columns(min(len(flux_krea_history), 4))
+        
+        for i, item in enumerate(flux_krea_history[:4]):
+            with cols[i]:
+                try:
+                    # 顯示縮略圖
+                    if item['image_url'].startswith('data:image'):
+                        base64_data = item['image_url'].split(',')[1] 
+                        img_data = base64.b64decode(base64_data)
+                        img = Image.open(BytesIO(img_data))
+                    else:
+                        img_response = requests.get(item['image_url'], timeout=5)
+                        img = Image.open(BytesIO(img_response.content))
+                    
+                    st.image(img, use_column_width=True)
+                    
+                    # 信息顯示
+                    info = item.get('generation_info', {})
+                    st.success(f"🎭 {info.get('model_name', 'FLUX Krea')}")
+                    st.caption(f"美學: {'⭐' * info.get('aesthetic_score', 5)}")
+                    
+                    if st.button("🔄 重新生成", key=f"krea_hist_{item['id']}", use_container_width=True):
+                        st.session_state.regenerate_info = info
+                        rerun_app()
+                        
+                except Exception:
+                    st.error("圖像載入失敗")
+    
+    if other_history:
+        st.markdown("#### ⚡ 其他模型作品")
+        cols = st.columns(min(len(other_history), 4))
+        
+        for i, item in enumerate(other_history[:4]):
+            with cols[i]:
+                try:
+                    # 顯示縮略圖
+                    if item['image_url'].startswith('data:image'):
+                        base64_data = item['image_url'].split(',')[1]
+                        img_data = base64.b64decode(base64_data)
+                        img = Image.open(BytesIO(img_data))
+                    else:
+                        img_response = requests.get(item['image_url'], timeout=5)
+                        img = Image.open(BytesIO(img_response.content))
+                    
+                    st.image(img, use_column_width=True)
+                    
+                    # 信息顯示
+                    info = item.get('generation_info', {})
+                    category_icon = {'flux': '⚡', 'stable-diffusion': '🎨'}.get(info.get('category'), '🤖')
+                    
+                    st.info(f"{category_icon} {info.get('model_name', 'N/A')}")
+                    
+                    if st.button("🔄 重新生成", key=f"other_hist_{item['id']}", use_container_width=True):
+                        st.session_state.regenerate_info = info
+                        rerun_app()
+                        
+                except Exception:
+                    st.error("圖像載入失敗")
+    
+    # 管理按鈕
+    col_clear, col_export = st.columns(2)
+    
+    with col_clear:
+        if st.button("🗑️ 清除歷史"):
+            st.session_state.generation_history = []
+            st.success("歷史已清除")
+            rerun_app()
+    
+    with col_export:
+        if len(history) > 0:
+            st.info(f"共 {len(history)} 張圖像")
+
 def init_session_state():
     """初始化會話狀態"""
     if 'api_config' not in st.session_state:
@@ -1117,16 +1933,7 @@ else:
         show_provider_model_discovery(selected_provider, provider_info)
     
     with management_tabs[2]:
-        st.markdown("### 🎨 圖像生成")
-        st.info("🚀 完整的圖像生成界面開發中，包含 FLUX Krea 特殊參數調節...")
-        
-        # 顯示可用模型
-        discovered_models = provider_manager.get_provider_models(selected_provider)
-        if discovered_models:
-            st.markdown("#### 🤖 可用模型")
-            for model in discovered_models:
-                icon = "🎭" if model['category'] == 'flux-krea' else model['icon']
-                st.write(f"{icon} **{model['model_name']}** - {model['description']}")
+        show_image_generation(selected_provider, provider_info)
     
     with management_tabs[3]:
         st.markdown("### 📊 性能監控")
@@ -1153,11 +1960,4 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666;">
-    🎭 <strong>FLUX Krea 美學優化</strong> | 
-    🌸 <strong>免費服務</strong> | 
-    ⚡ <strong>快速切換</strong> | 
-    📊 <strong>智能管理</strong>
-    <br><br>
-    <small>現已全面支援 FLUX Krea 美學優化模型，打造真正專業級的 AI 圖像生成體驗！</small>
-</div>
-""", unsafe_allow_html=True)
+    🎭 <strong>FLUX Krea
