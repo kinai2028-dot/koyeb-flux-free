@@ -54,8 +54,9 @@ API_PROVIDERS = {
         "name": "Pollinations.ai",
         "base_url_default": "https://image.pollinations.ai",
         "key_prefix": "",
-        "description": "免費、開源的圖像生成 API (無需密鑰)",
-        "icon": "🌸"
+        "description": "支援免費和認證模式的圖像生成 API",
+        "icon": "🌸",
+        "auth_modes": ["free", "referrer", "token"]
     },
     "Hugging Face": {
         "name": "Hugging Face Inference",
@@ -97,7 +98,8 @@ BASE_FLUX_MODELS = {
         "test_prompt": "A simple cat sitting on a table",
         "expected_size": "1024x1024",
         "priority": 1,
-        "source": "base"
+        "source": "base",
+        "auth_required": False
     },
     "flux.1-dev": {
         "name": "FLUX.1 Dev",
@@ -107,7 +109,8 @@ BASE_FLUX_MODELS = {
         "test_prompt": "A beautiful landscape with mountains",
         "expected_size": "1024x1024",
         "priority": 2,
-        "source": "base"
+        "source": "base",
+        "auth_required": False
     },
     "flux.1.1-pro": {
         "name": "FLUX.1.1 Pro",
@@ -117,17 +120,19 @@ BASE_FLUX_MODELS = {
         "test_prompt": "Professional portrait of a person in business attire",
         "expected_size": "1024x1024",
         "priority": 3,
-        "source": "base"
+        "source": "base",
+        "auth_required": False
     },
     "flux.1-kontext-pro": {
         "name": "FLUX.1 Kontext Pro",
-        "description": "支持圖像編輯和上下文理解",
+        "description": "支持圖像編輯和上下文理解（需認證）",
         "icon": "🎯",
         "type": "編輯專用",
         "test_prompt": "Abstract geometric shapes in vibrant colors",
         "expected_size": "1024x1024",
         "priority": 4,
-        "source": "base"
+        "source": "base",
+        "auth_required": True
     }
 }
 
@@ -137,25 +142,29 @@ FLUX_MODEL_PATTERNS = {
         "name_template": "FLUX.1 Schnell",
         "icon": "⚡",
         "type": "快速生成",
-        "priority_base": 100
+        "priority_base": 100,
+        "auth_required": False
     },
     r'flux[\.\-]?1[\.\-]?dev': {
         "name_template": "FLUX.1 Dev",
         "icon": "🔧",
         "type": "開發版本",
-        "priority_base": 200
+        "priority_base": 200,
+        "auth_required": False
     },
     r'flux[\.\-]?1[\.\-]?pro': {
         "name_template": "FLUX.1 Pro",
         "icon": "👑",
         "type": "專業版本",
-        "priority_base": 300
+        "priority_base": 300,
+        "auth_required": False
     },
-    r'flux[\.\-]?1[\.\-]?kontext': {
+    r'flux[\.\-]?1[\.\-]?kontext|kontext': {
         "name_template": "FLUX.1 Kontext",
         "icon": "🎯",
         "type": "上下文理解",
-        "priority_base": 400
+        "priority_base": 400,
+        "auth_required": True
     }
 }
 
@@ -211,7 +220,7 @@ def auto_discover_flux_models(client, provider: str, api_key: str, base_url: str
 def is_flux_model(model_name: str) -> bool:
     """檢查模型名稱是否為 Flux 模型"""
     model_lower = model_name.lower()
-    flux_keywords = ['flux', 'black-forest-labs']
+    flux_keywords = ['flux', 'black-forest-labs', 'kontext']
     return any(keyword in model_lower for keyword in flux_keywords)
 
 def analyze_model_name(model_id: str, full_path: str = None) -> Dict:
@@ -228,7 +237,8 @@ def analyze_model_name(model_id: str, full_path: str = None) -> Dict:
                 "test_prompt": "A beautiful scene with detailed elements",
                 "expected_size": "1024x1024",
                 "priority": info["priority_base"] + hash(model_id) % 100,
-                "auto_discovered": True
+                "auto_discovered": True,
+                "auth_required": info.get("auth_required", False)
             }
             
             if full_path:
@@ -248,6 +258,7 @@ def analyze_model_name(model_id: str, full_path: str = None) -> Dict:
         "expected_size": "1024x1024",
         "priority": 999,
         "auto_discovered": True,
+        "auth_required": 'kontext' in model_id.lower(),
         "full_path": full_path if full_path else model_id
     }
 
@@ -384,7 +395,7 @@ def test_model_availability(client, model_name: str, provider: str, api_key: str
     return test_result
 
 def generate_images_with_retry(client, provider: str, api_key: str, base_url: str, **params) -> Tuple[bool, any]:
-    """帶重試機制的圖像生成，新增 Pollinations.ai 支持"""
+    """帶重試機制的圖像生成，支援 Pollinations.ai 認證"""
     max_retries = 3
     base_delay = 2
     
@@ -402,17 +413,27 @@ def generate_images_with_retry(client, provider: str, api_key: str, base_url: st
                     "model": params.get("model"),
                     "width": width,
                     "height": height,
-                    "seed": random.randint(0, 1000000), # Pollinations uses seed
+                    "seed": random.randint(0, 1000000),
                     "nologo": "true"
                 }
                 
                 # 清理 None 值
                 query_params = {k: v for k, v in query_params.items() if v is not None}
                 
+                # 處理認證
+                headers = {}
+                config = st.session_state.get('api_config', {})
+                auth_mode = config.get('pollinations_auth_mode', 'free')
+                
+                if auth_mode == 'token' and config.get('pollinations_token'):
+                    headers['Authorization'] = f"Bearer {config['pollinations_token']}"
+                elif auth_mode == 'referrer' and config.get('pollinations_referrer'):
+                    headers['Referer'] = config['pollinations_referrer']
+                
                 encoded_prompt = quote(prompt)
                 request_url = f"{base_url}/prompt/{encoded_prompt}?{urlencode(query_params)}"
                 
-                response = requests.get(request_url, timeout=120)
+                response = requests.get(request_url, headers=headers, timeout=120)
 
                 if response.status_code == 200:
                     # 模擬 OpenAI 響應格式
@@ -422,14 +443,12 @@ def generate_images_with_retry(client, provider: str, api_key: str, base_url: st
                                 'url': f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
                             })()]
                     
-                    # Pollinations.ai 只支持一次生成一張圖
-                    num_images = params.get("n", 1)
-                    if num_images > 1:
-                        st.warning("Pollinations.ai 每次僅支持生成一張圖像，已自動設為 1。")
-
                     return True, MockResponse(response.content)
                 else:
-                    raise Exception(f"HTTP {response.status_code}: {response.text}")
+                    error_text = response.text
+                    if "Access to" in error_text and "is limited" in error_text:
+                        return False, f"此模型需要認證。請在側邊欄配置 Pollinations.ai 認證信息。錯誤: {error_text}"
+                    raise Exception(f"HTTP {response.status_code}: {error_text}")
             
             elif provider == "Hugging Face":
                 # Hugging Face API 調用
@@ -492,7 +511,10 @@ def init_session_state():
             'provider': 'Navy',
             'api_key': '',
             'base_url': 'https://api.navy/v1',
-            'validated': False
+            'validated': False,
+            'pollinations_auth_mode': 'free',
+            'pollinations_token': '',
+            'pollinations_referrer': ''
         }
     
     if 'generation_history' not in st.session_state:
@@ -506,6 +528,10 @@ def init_session_state():
     
     if 'discovered_models' not in st.session_state:
         st.session_state.discovered_models = {}
+    
+    # 新增：初始化模型更新標誌
+    if 'models_updated' not in st.session_state:
+        st.session_state.models_updated = False
 
 def add_to_history(prompt: str, model: str, images: List[str], metadata: Dict):
     """添加生成記錄到歷史"""
@@ -623,6 +649,46 @@ def show_api_settings():
     provider_info = API_PROVIDERS[selected_provider]
     st.info(f"📋 {provider_info['description']}")
     
+    # Pollinations.ai 特殊認證設置
+    if selected_provider == "Pollinations.ai":
+        st.markdown("### 🌸 Pollinations.ai 認證設置")
+        
+        auth_mode = st.radio(
+            "選擇認證模式",
+            options=["free", "referrer", "token"],
+            format_func=lambda x: {
+                "free": "🆓 免費模式（基礎模型）",
+                "referrer": "🌐 域名認證（推薦）", 
+                "token": "🔑 Token 認證（高級）"
+            }[x],
+            index=["free", "referrer", "token"].index(
+                st.session_state.api_config.get('pollinations_auth_mode', 'free')
+            )
+        )
+        
+        if auth_mode == "referrer":
+            st.info("輸入您的應用域名以存取更多模型（如 kontext）")
+            referrer_input = st.text_input(
+                "應用域名",
+                value=st.session_state.api_config.get('pollinations_referrer', ''),
+                placeholder="例如：myapp.vercel.app 或 username.github.io",
+                help="輸入您部署應用的域名"
+            )
+        elif auth_mode == "token":
+            st.info("使用 Token 進行後端認證，適合服務端整合")
+            token_input = st.text_input(
+                "Pollinations Token",
+                value="",
+                type="password",
+                placeholder="在 https://auth.pollinations.ai 獲取您的 token",
+                help="獲取 token：https://auth.pollinations.ai"
+            )
+            current_token = st.session_state.api_config.get('pollinations_token', '')
+            if current_token and not token_input:
+                st.caption(f"🔐 當前 Token: {current_token[:10]}...{current_token[-8:] if len(current_token) > 18 else ''}")
+        else:
+            st.info("免費模式：無需認證，但只能使用基礎模型")
+    
     is_key_required = selected_provider not in ["Pollinations.ai"]
     
     api_key_input = ""
@@ -640,8 +706,9 @@ def show_api_settings():
         if current_key and not api_key_input:
             st.caption(f"🔐 當前密鑰: {masked_key}")
     else:
-        st.success("✅ 此提供商無需 API 密鑰。")
-        current_key = "N/A" # For keyless providers
+        if selected_provider != "Pollinations.ai":
+            st.success("✅ 此提供商無需 API 密鑰。")
+        current_key = "N/A"
 
     # 處理 Base URL 變化
     if selected_provider != current_provider:
@@ -674,15 +741,29 @@ def show_api_settings():
         elif not base_url_input:
             st.error("❌ 請輸入 API 端點 URL")
         else:
-            st.session_state.api_config = {
+            config_update = {
                 'provider': selected_provider,
                 'api_key': final_api_key,
                 'base_url': base_url_input,
                 'validated': False
             }
-            # 清除舊的發現模型
+            
+            # Pollinations.ai 特殊設置
+            if selected_provider == "Pollinations.ai":
+                config_update['pollinations_auth_mode'] = auth_mode
+                if auth_mode == "referrer":
+                    config_update['pollinations_referrer'] = referrer_input
+                elif auth_mode == "token":
+                    config_update['pollinations_token'] = token_input if token_input else st.session_state.api_config.get('pollinations_token', '')
+            
+            st.session_state.api_config.update(config_update)
+            # 清除舊的發現模型和選擇的模型
             st.session_state.discovered_models = {}
+            if 'selected_model' in st.session_state:
+                del st.session_state.selected_model
+            st.session_state.models_updated = True
             st.success("✅ API 設置已保存，模型列表已重置。")
+            time.sleep(0.5)  # 給用戶時間看到成功消息
             rerun_app()
     
     if test_btn:
@@ -706,10 +787,17 @@ def show_api_settings():
             'provider': 'Navy',
             'api_key': '',
             'base_url': 'https://api.navy/v1',
-            'validated': False
+            'validated': False,
+            'pollinations_auth_mode': 'free',
+            'pollinations_token': '',
+            'pollinations_referrer': ''
         }
         st.session_state.discovered_models = {}
+        if 'selected_model' in st.session_state:
+            del st.session_state.selected_model
+        st.session_state.models_updated = True
         st.success("🗑️ API 設置已清除，模型列表已重置。")
+        time.sleep(0.5)  # 給用戶時間看到成功消息
         rerun_app()
 
 
@@ -723,35 +811,51 @@ def auto_discover_models():
         st.error("❌ 請先配置 API 密鑰")
         return
     
-    with st.spinner("🔍 正在自動發現模型..."):
-        client = None
-        if provider not in ["Hugging Face", "Pollinations.ai"]:
-            client = OpenAI(api_key=config['api_key'], base_url=config['base_url'])
-        
-        discovered = auto_discover_flux_models(
-            client, config['provider'], config['api_key'], config['base_url']
-        )
-        
-        if 'discovered_models' not in st.session_state:
-            st.session_state.discovered_models = {}
-        
-        new_count = 0
-        for model_id, model_info in discovered.items():
-            # 確保不會重複計數
-            if model_id not in BASE_FLUX_MODELS and model_id not in st.session_state.discovered_models:
-                new_count += 1
-            st.session_state.discovered_models[model_id] = model_info
-        
-        if new_count > 0:
-            st.success(f"✅ 發現 {new_count} 個新的模型！")
-        elif discovered:
-             st.info("ℹ️ 已刷新模型列表，未發現新模型。")
-        else:
-            st.warning("⚠️ 未發現任何兼容模型。")
-        
-        # 短暫延遲後重新運行以確保UI更新
-        time.sleep(1)
-        rerun_app()
+    # 顯示發現進度
+    progress_placeholder = st.empty()
+    
+    with progress_placeholder.container():
+        with st.spinner("🔍 正在自動發現模型..."):
+            client = None
+            if provider not in ["Hugging Face", "Pollinations.ai"]:
+                client = OpenAI(api_key=config['api_key'], base_url=config['base_url'])
+            
+            discovered = auto_discover_flux_models(
+                client, config['provider'], config['api_key'], config['base_url']
+            )
+            
+            if 'discovered_models' not in st.session_state:
+                st.session_state.discovered_models = {}
+            
+            new_count = 0
+            for model_id, model_info in discovered.items():
+                # 確保不會重複計數
+                if model_id not in BASE_FLUX_MODELS and model_id not in st.session_state.discovered_models:
+                    new_count += 1
+                st.session_state.discovered_models[model_id] = model_info
+            
+            # 重置已選擇的模型以確保使用新的模型列表
+            if 'selected_model' in st.session_state:
+                current_model = st.session_state.selected_model
+                all_models = merge_models()
+                if current_model not in all_models:
+                    del st.session_state.selected_model
+            
+            # 設置模型更新標誌
+            st.session_state.models_updated = True
+            
+            # 根據發現結果顯示相應消息
+            if new_count > 0:
+                progress_placeholder.success(f"✅ 發現 {new_count} 個新的模型！")
+            elif discovered:
+                progress_placeholder.info("ℹ️ 已刷新模型列表，未發現新模型。")
+            else:
+                progress_placeholder.warning("⚠️ 未發現任何兼容模型。")
+            
+            # 延遲後清除消息並重新運行應用
+            time.sleep(2)
+            progress_placeholder.empty()
+            rerun_app()
 
 
 # 初始化
@@ -763,7 +867,6 @@ provider = config.get('provider')
 is_key_required = provider not in ["Pollinations.ai"]
 api_configured = (not is_key_required) or (config.get('api_key') and config.get('api_key') != 'N/A')
 
-
 # 側邊欄
 with st.sidebar:
     show_api_settings()
@@ -771,6 +874,17 @@ with st.sidebar:
     
     if api_configured:
         st.success(f"🟢 {provider} API 已配置")
+        
+        # 顯示 Pollinations.ai 認證狀態
+        if provider == "Pollinations.ai":
+            auth_mode = config.get('pollinations_auth_mode', 'free')
+            auth_status = {
+                'free': '🆓 免費模式',
+                'referrer': f'🌐 域名認證: {config.get("pollinations_referrer", "未設置")}',
+                'token': '🔑 Token 認證'
+            }
+            st.caption(f"認證狀態: {auth_status[auth_mode]}")
+        
         if st.button("🔍 發現模型", use_container_width=True):
             auto_discover_models()
     else:
@@ -796,9 +910,15 @@ with tab1:
             # 使用合併後的模型列表
             all_models = merge_models()
             
+            # 檢查是否需要提示用戶發現模型
             if not all_models:
                 st.warning("⚠️ 尚未發現任何模型，請點擊側邊欄的「發現模型」按鈕")
             else:
+                # 如果模型列表被更新，顯示提示
+                if st.session_state.get('models_updated', False):
+                    st.info(f"🔄 模型列表已更新，共發現 {len(all_models)} 個可用模型")
+                    st.session_state.models_updated = False  # 重置標誌
+                
                 # 模型選擇
                 model_options = list(all_models.keys())
                 
@@ -810,19 +930,29 @@ with tab1:
                     selected_model_key = st.session_state.selected_model
                 else:
                     selected_model_key = model_options[0]
+                    st.session_state.selected_model = selected_model_key
 
                 selected_model = st.selectbox(
                     "選擇模型:",
                     options=model_options,
                     index=model_options.index(selected_model_key),
-                    format_func=lambda x: f"{all_models[x].get('icon', '🤖')} {all_models[x].get('name', x)}"
+                    format_func=lambda x: f"{all_models[x].get('icon', '🤖')} {all_models[x].get('name', x)}" + 
+                                         (" 🔐" if all_models[x].get('auth_required', False) else ""),
+                    key="model_selector"
                 )
                 
                 st.session_state.selected_model = selected_model
                 
-                # 顯示模型信息
+                # 顯示模型信息和認證警告
                 model_info = all_models[selected_model]
-                st.info(f"**{model_info.get('name')}**: {model_info.get('description', 'N/A')}")
+                description = model_info.get('description', 'N/A')
+                st.info(f"**{model_info.get('name')}**: {description}")
+                
+                # 檢查認證要求
+                if model_info.get('auth_required', False) and provider == "Pollinations.ai":
+                    auth_mode = config.get('pollinations_auth_mode', 'free')
+                    if auth_mode == 'free':
+                        st.warning("⚠️ 此模型需要認證才能使用。請在側邊欄配置 Pollinations.ai 認證（域名或 Token）。")
                 
                 # 檢查重新生成狀態
                 default_prompt = ""
@@ -951,7 +1081,8 @@ with tab1:
                                 "403": "🚫 檢查 API 密鑰權限",
                                 "404": "🔍 檢查模型名稱或 API 端點是否正確",
                                 "429": "⏳ 請求過於頻繁，稍後再試",
-                                "500": "🔧 服務器錯誤，請稍後重試"
+                                "500": "🔧 服務器錯誤，請稍後重試或檢查認證設置",
+                                "Access to": "🔐 模型需要認證，請配置 Pollinations.ai 認證信息"
                             }
                             
                             for error_code, suggestion in error_suggestions.items():
@@ -979,6 +1110,11 @@ with tab1:
             - 🎨 **風格化**: 加入藝術風格關鍵詞 (例如：`cinematic lighting`, `Van Gogh style`, `cyberpunk`)。
             - 📐 **構圖**: 指定構圖和視角 (例如：`wide-angle shot`, `from a low angle`, `portrait`)。
             - 🌈 **光影色彩**: 描述色彩和光線效果 (例如：`vibrant colors`, `dramatic lighting`, `morning mist`)。
+            
+            **Pollinations.ai 認證:**
+            - 🆓 **免費模式**: 基礎模型無需認證
+            - 🌐 **域名認證**: 輸入您的應用域名以存取更多模型
+            - 🔑 **Token 認證**: 在 [auth.pollinations.ai](https://auth.pollinations.ai) 獲取 token
             
             **Koyeb 部署特色:**
             - 🚀 **Scale-to-Zero**: 根據流量自動縮放應用，節省成本。
