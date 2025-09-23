@@ -548,4 +548,547 @@ def display_image_with_actions(image_url: str, image_id: str, history_item: Dict
                 data=img_buffer.getvalue(),
                 file_name=f"flux_generated_{image_id}.png",
                 mime="image/png",
-                key=f"download_{image
+                key=f"download_{image_id}",
+                use_container_width=True
+            )
+        
+        with col2:
+            is_favorite = any(fav['id'] == image_id for fav in st.session_state.favorite_images)
+            if st.button(
+                "⭐ 已收藏" if is_favorite else "☆ 收藏",
+                key=f"favorite_{image_id}",
+                use_container_width=True
+            ):
+                if is_favorite:
+                    st.session_state.favorite_images = [
+                        fav for fav in st.session_state.favorite_images if fav['id'] != image_id
+                    ]
+                    st.success("已取消收藏")
+                else:
+                    favorite_item = {
+                        "id": image_id,
+                        "image_url": image_url,
+                        "timestamp": datetime.datetime.now(),
+                        "history_item": history_item
+                    }
+                    st.session_state.favorite_images.append(favorite_item)
+                    st.success("已加入收藏")
+                rerun_app()
+        
+        with col3:
+            if history_item and st.button(
+                "🔄 重新生成",
+                key=f"regenerate_{image_id}",
+                use_container_width=True
+            ):
+                st.session_state.regenerate_prompt = history_item['prompt']
+                st.session_state.regenerate_model = history_item['model']
+                rerun_app()
+    
+    except Exception as e:
+        st.error(f"圖像顯示錯誤: {str(e)}")
+
+def init_api_client():
+    """初始化 API 客戶端"""
+    config = st.session_state.api_config
+    if config.get('provider') in ["Hugging Face", "Pollinations.ai"]:
+        return None
+    if config.get('api_key'):
+        try:
+            return OpenAI(
+                api_key=config['api_key'],
+                base_url=config['base_url']
+            )
+        except Exception:
+            return None
+    return None
+
+def show_api_settings():
+    """顯示 API 設置界面"""
+    st.subheader("🔑 API 設置")
+    
+    provider_options = list(API_PROVIDERS.keys())
+    current_provider = st.session_state.api_config.get('provider', 'Navy')
+    
+    # 確保當前 provider 在選項中
+    provider_index = provider_options.index(current_provider) if current_provider in provider_options else 0
+    
+    selected_provider = st.selectbox(
+        "選擇 API 提供商",
+        options=provider_options,
+        index=provider_index,
+        format_func=lambda x: f"{API_PROVIDERS[x]['icon']} {API_PROVIDERS[x]['name']}"
+    )
+    
+    provider_info = API_PROVIDERS[selected_provider]
+    st.info(f"📋 {provider_info['description']}")
+    
+    is_key_required = selected_provider not in ["Pollinations.ai"]
+    
+    api_key_input = ""
+    current_key = st.session_state.api_config.get('api_key', '')
+    
+    if is_key_required:
+        masked_key = '*' * 20 + current_key[-8:] if len(current_key) > 8 else ''
+        api_key_input = st.text_input(
+            "API 密鑰",
+            value="",
+            type="password",
+            placeholder=f"請輸入 {provider_info['name']} 的 API 密鑰...",
+            help=f"API 密鑰通常以 '{provider_info['key_prefix']}' 開頭"
+        )
+        if current_key and not api_key_input:
+            st.caption(f"🔐 當前密鑰: {masked_key}")
+    else:
+        st.success("✅ 此提供商無需 API 密鑰。")
+        current_key = "N/A" # For keyless providers
+
+    # 處理 Base URL 變化
+    if selected_provider != current_provider:
+        base_url_value = provider_info['base_url_default']
+    else:
+        base_url_value = st.session_state.api_config.get('base_url', provider_info['base_url_default'])
+
+    base_url_input = st.text_input(
+        "API 端點 URL",
+        value=base_url_value,
+        placeholder=provider_info['base_url_default'],
+        help="API 服務的基礎 URL"
+    )
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        save_btn = st.button("💾 保存設置", type="primary")
+    
+    with col2:
+        test_btn = st.button("🧪 測試連接")
+    
+    with col3:
+        clear_btn = st.button("🗑️ 清除設置", type="secondary")
+    
+    if save_btn:
+        final_api_key = api_key_input if api_key_input else current_key
+        if is_key_required and not final_api_key:
+            st.error("❌ 請輸入 API 密鑰")
+        elif not base_url_input:
+            st.error("❌ 請輸入 API 端點 URL")
+        else:
+            st.session_state.api_config = {
+                'provider': selected_provider,
+                'api_key': final_api_key,
+                'base_url': base_url_input,
+                'validated': False
+            }
+            # 清除舊的發現模型
+            st.session_state.discovered_models = {}
+            st.success("✅ API 設置已保存，模型列表已重置。")
+            rerun_app()
+    
+    if test_btn:
+        test_api_key = api_key_input if api_key_input else current_key
+        if is_key_required and not test_api_key:
+            st.error("❌ 請先輸入 API 密鑰")
+        elif not base_url_input:
+            st.error("❌ 請輸入 API 端點 URL")
+        else:
+            with st.spinner("正在測試 API 連接..."):
+                is_valid, message = validate_api_key(test_api_key, base_url_input, selected_provider)
+                if is_valid:
+                    st.success(f"✅ {message}")
+                    st.session_state.api_config['validated'] = True
+                else:
+                    st.error(f"❌ {message}")
+                    st.session_state.api_config['validated'] = False
+    
+    if clear_btn:
+        st.session_state.api_config = {
+            'provider': 'Navy',
+            'api_key': '',
+            'base_url': 'https://api.navy/v1',
+            'validated': False
+        }
+        st.session_state.discovered_models = {}
+        st.success("🗑️ API 設置已清除，模型列表已重置。")
+        rerun_app()
+
+
+def auto_discover_models():
+    """執行自動模型發現"""
+    config = st.session_state.api_config
+    provider = config.get('provider')
+    is_key_required = provider not in ["Pollinations.ai"]
+    
+    if is_key_required and not config.get('api_key'):
+        st.error("❌ 請先配置 API 密鑰")
+        return
+    
+    with st.spinner("🔍 正在自動發現模型..."):
+        client = None
+        if provider not in ["Hugging Face", "Pollinations.ai"]:
+            client = OpenAI(api_key=config['api_key'], base_url=config['base_url'])
+        
+        discovered = auto_discover_flux_models(
+            client, config['provider'], config['api_key'], config['base_url']
+        )
+        
+        if 'discovered_models' not in st.session_state:
+            st.session_state.discovered_models = {}
+        
+        new_count = 0
+        for model_id, model_info in discovered.items():
+            # 確保不會重複計數
+            if model_id not in BASE_FLUX_MODELS and model_id not in st.session_state.discovered_models:
+                new_count += 1
+            st.session_state.discovered_models[model_id] = model_info
+        
+        if new_count > 0:
+            st.success(f"✅ 發現 {new_count} 個新的模型！")
+        elif discovered:
+             st.info("ℹ️ 已刷新模型列表，未發現新模型。")
+        else:
+            st.warning("⚠️ 未發現任何兼容模型。")
+        
+        # 短暫延遲後重新運行以確保UI更新
+        time.sleep(1)
+        rerun_app()
+
+
+# 初始化
+init_session_state()
+client = init_api_client()
+
+config = st.session_state.api_config
+provider = config.get('provider')
+is_key_required = provider not in ["Pollinations.ai"]
+api_configured = (not is_key_required) or (config.get('api_key') and config.get('api_key') != 'N/A')
+
+
+# 側邊欄
+with st.sidebar:
+    show_api_settings()
+    st.markdown("---")
+    
+    if api_configured:
+        st.success(f"🟢 {provider} API 已配置")
+        if st.button("🔍 發現模型", use_container_width=True):
+            auto_discover_models()
+    else:
+        st.error("🔴 API 未配置")
+
+# 主標題
+st.title("🎨 Flux AI 圖像生成器 Pro - 完整版")
+
+# 頁面導航
+tab1, tab2, tab3 = st.tabs(["🚀 圖像生成", "📚 歷史記錄", "⭐ 收藏夾"])
+
+# 圖像生成頁面
+with tab1:
+    if not api_configured:
+        st.warning("⚠️ 請先在側邊欄配置 API")
+        st.info("配置完成後即可開始生成圖像")
+    else:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("🎨 圖像生成")
+            
+            # 使用合併後的模型列表
+            all_models = merge_models()
+            
+            if not all_models:
+                st.warning("⚠️ 尚未發現任何模型，請點擊側邊欄的「發現模型」按鈕")
+            else:
+                # 模型選擇
+                model_options = list(all_models.keys())
+                
+                # 處理重新生成時的模型選擇
+                regenerate_model = getattr(st.session_state, 'regenerate_model', None)
+                if regenerate_model and regenerate_model in model_options:
+                    selected_model_key = regenerate_model
+                elif 'selected_model' in st.session_state and st.session_state.selected_model in model_options:
+                    selected_model_key = st.session_state.selected_model
+                else:
+                    selected_model_key = model_options[0]
+
+                selected_model = st.selectbox(
+                    "選擇模型:",
+                    options=model_options,
+                    index=model_options.index(selected_model_key),
+                    format_func=lambda x: f"{all_models[x].get('icon', '🤖')} {all_models[x].get('name', x)}"
+                )
+                
+                st.session_state.selected_model = selected_model
+                
+                # 顯示模型信息
+                model_info = all_models[selected_model]
+                st.info(f"**{model_info.get('name')}**: {model_info.get('description', 'N/A')}")
+                
+                # 檢查重新生成狀態
+                default_prompt = ""
+                if hasattr(st.session_state, 'regenerate_prompt'):
+                    default_prompt = st.session_state.regenerate_prompt
+                    delattr(st.session_state, 'regenerate_prompt')
+                    if hasattr(st.session_state, 'regenerate_model'):
+                        delattr(st.session_state, 'regenerate_model')
+                
+                # 提示詞輸入
+                prompt_value = st.text_area(
+                    "輸入提示詞:",
+                    value=default_prompt,
+                    height=120,
+                    placeholder="描述您想要生成的圖像，例如：A majestic dragon flying over ancient mountains during sunset, highly detailed, fantasy art style"
+                )
+                
+                # 高級設置
+                with st.expander("🔧 高級設置"):
+                    col_size, col_num = st.columns(2)
+                    
+                    with col_size:
+                        size_options = {
+                            "1024x1024": "正方形 (1:1)",
+                            "1152x896": "橫向 (4:3.5)",
+                            "896x1152": "直向 (3.5:4)",
+                            "1344x768": "寬屏 (16:9)",
+                            "768x1344": "超高 (9:16)"
+                        }
+                        selected_size = st.selectbox(
+                            "圖像尺寸",
+                            options=list(size_options.keys()),
+                            format_func=lambda x: f"{x} - {size_options[x]}",
+                            index=0
+                        )
+                    
+                    with col_num:
+                        # Pollinations.ai 僅支持單張生成
+                        num_images = 1 if provider == "Pollinations.ai" else st.slider("生成數量", 1, 4, 1)
+                        if provider == "Pollinations.ai":
+                            st.caption("Pollinations.ai 僅支持單張圖像生成。")
+                
+                # 生成按鈕
+                generate_ready = prompt_value.strip() and api_configured
+                
+                generate_btn = st.button(
+                    "🚀 生成圖像",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=not generate_ready
+                )
+                
+                if not generate_ready:
+                    if not prompt_value.strip():
+                        st.warning("⚠️ 請輸入提示詞")
+                    elif not api_configured:
+                        st.error("❌ 請配置 API")
+                
+                # 圖像生成邏輯
+                if generate_btn and generate_ready:
+                    config = st.session_state.api_config
+                    
+                    with st.spinner(f"🎨 使用 {model_info.get('name', selected_model)} 正在生成圖像..."):
+                        # 顯示進度信息
+                        progress_info = st.empty()
+                        progress_info.info(f"⏳ 模型: {model_info.get('name')} | 尺寸: {selected_size} | 數量: {num_images}")
+                        
+                        generation_params = {
+                            "model": selected_model,
+                            "prompt": prompt_value,
+                            "n": num_images,
+                            "size": selected_size
+                        }
+                        
+                        success, result = generate_images_with_retry(
+                            client, config['provider'], config['api_key'], 
+                            config['base_url'], **generation_params
+                        )
+                        
+                        progress_info.empty()
+                        
+                        if success:
+                            response = result
+                            image_urls = [img.url for img in response.data]
+                            
+                            metadata = {
+                                "size": selected_size,
+                                "num_images": len(image_urls),
+                                "model_name": model_info.get('name', selected_model),
+                                "api_provider": config['provider'],
+                                "generation_time": time.time()
+                            }
+                            
+                            add_to_history(prompt_value, selected_model, image_urls, metadata)
+                            st.success(f"✨ 成功生成 {len(response.data)} 張圖像！")
+                            
+                            # 顯示生成的圖像
+                            if len(response.data) == 1:
+                                # 單張圖像，全寬顯示
+                                st.subheader("🎨 生成結果")
+                                image_id = f"{st.session_state.generation_history[0]['id']}_0"
+                                display_image_with_actions(
+                                    response.data[0].url,
+                                    image_id,
+                                    st.session_state.generation_history[0]
+                                )
+                            else:
+                                # 多張圖像，網格顯示
+                                st.subheader("🎨 生成結果")
+                                cols = st.columns(min(num_images, 2))
+                                for i, image_data in enumerate(response.data):
+                                    with cols[i % len(cols)]:
+                                        st.markdown(f"**圖像 {i+1}**")
+                                        image_id = f"{st.session_state.generation_history[0]['id']}_{i}"
+                                        display_image_with_actions(
+                                            image_data.url,
+                                            image_id,
+                                            st.session_state.generation_history[0]
+                                        )
+                        else:
+                            st.error(f"❌ 生成失敗: {result}")
+                            
+                            # 提供錯誤解決建議
+                            error_suggestions = {
+                                "401": "🔐 檢查 API 密鑰是否正確",
+                                "403": "🚫 檢查 API 密鑰權限",
+                                "404": "🔍 檢查模型名稱或 API 端點是否正確",
+                                "429": "⏳ 請求過於頻繁，稍後再試",
+                                "500": "🔧 服務器錯誤，請稍後重試"
+                            }
+                            
+                            for error_code, suggestion in error_suggestions.items():
+                                if error_code in str(result):
+                                    st.info(f"💡 建議: {suggestion}")
+                                    break
+        
+        with col2:
+            st.subheader("ℹ️ 生成信息")
+            
+            all_models = merge_models()
+            base_count = len([m for m in all_models.values() if m.get('source') == 'base'])
+            discovered_count = len(all_models) - base_count
+            
+            col_stat1, col_stat2 = st.columns(2)
+            with col_stat1:
+                st.metric("可用模型", len(all_models), f"{discovered_count} 個已發現")
+            with col_stat2:
+                st.metric("生成記錄", len(st.session_state.generation_history))
+            
+            st.markdown("### 📋 使用建議")
+            st.markdown("""
+            **提示詞優化技巧:**
+            - 🎯 **具體化**: 使用具體描述而非抽象概念 (例如："a golden retriever puppy" vs "a dog")。
+            - 🎨 **風格化**: 加入藝術風格關鍵詞 (例如：`cinematic lighting`, `Van Gogh style`, `cyberpunk`)。
+            - 📐 **構圖**: 指定構圖和視角 (例如：`wide-angle shot`, `from a low angle`, `portrait`)。
+            - 🌈 **光影色彩**: 描述色彩和光線效果 (例如：`vibrant colors`, `dramatic lighting`, `morning mist`)。
+            
+            **Koyeb 部署特色:**
+            - 🚀 **Scale-to-Zero**: 根據流量自動縮放應用，節省成本。
+            - 🌐 **全球 CDN 加速**: 內置 CDN 為全球用戶提供低延遲訪問。
+            - 📊 **實時監控**: 提供應用性能和資源使用情況的實時儀表板。
+            - 🔒 **安全環境**: 自動 SSL 加密和安全的 API 密鑰管理。
+            """)
+
+# 歷史記錄頁面
+with tab2:
+    st.subheader("📚 生成歷史")
+    
+    if st.session_state.generation_history:
+        # 搜索和過濾
+        col_search, col_clear = st.columns([3, 1])
+        with col_search:
+            search_term = st.text_input("🔍 搜索歷史記錄", placeholder="輸入關鍵詞搜索提示詞...")
+        with col_clear:
+            if st.button("🗑️ 清空歷史記錄", use_container_width=True):
+                 if st.checkbox("確認清空所有歷史記錄", key="confirm_clear_history"):
+                    st.session_state.generation_history = []
+                    st.success("已清空所有歷史記錄")
+                    time.sleep(1)
+                    rerun_app()
+
+        filtered_history = st.session_state.generation_history
+        if search_term:
+            filtered_history = [
+                item for item in st.session_state.generation_history
+                if search_term.lower() in item['prompt'].lower()
+            ]
+        
+        st.info(f"顯示 {len(filtered_history)} / {len(st.session_state.generation_history)} 條記錄")
+        
+        for item in filtered_history:
+            with st.expander(
+                f"🎨 {item['prompt'][:60]}{'...' if len(item['prompt']) > 60 else ''} | {item['timestamp'].strftime('%m-%d %H:%M')}"
+            ):
+                col_info, col_actions = st.columns([3, 1])
+                
+                with col_info:
+                    st.markdown(f"**提示詞**: {item['prompt']}")
+                    all_models = merge_models()
+                    model_name = all_models.get(item['model'], {}).get('name', item['model'])
+                    st.markdown(f"**模型**: {model_name}")
+                    st.markdown(f"**時間**: {item['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    if 'metadata' in item:
+                        metadata = item['metadata']
+                        st.markdown(f"**尺寸**: {metadata.get('size', 'N/A')}")
+                        st.markdown(f"**API提供商**: {metadata.get('api_provider', 'N/A')}")
+                
+                with col_actions:
+                    if st.button("🔄 重新生成", key=f"regen_{item['id']}", use_container_width=True):
+                        st.session_state.regenerate_prompt = item['prompt']
+                        st.session_state.regenerate_model = item['model']
+                        rerun_app()
+                
+                # 顯示圖像
+                if item['images']:
+                    cols = st.columns(min(len(item['images']), 3))
+                    for i, img_url in enumerate(item['images']):
+                        with cols[i % len(cols)]:
+                            display_image_with_actions(img_url, f"history_{item['id']}_{i}", item)
+    else:
+        st.info("📭 尚無生成歷史，開始生成一些圖像吧！")
+
+# 收藏夾頁面
+with tab3:
+    st.subheader("⭐ 我的收藏")
+    
+    if st.session_state.favorite_images:
+        # 批量操作
+        col_batch1, col_batch2 = st.columns(2)
+        with col_batch1:
+            st.button("📥 批量下載 (開發中)", use_container_width=True, disabled=True)
+        with col_batch2:
+            if st.button("🗑️ 清空收藏", use_container_width=True):
+                if st.checkbox("確認清空所有收藏", key="confirm_clear_favorites"):
+                    st.session_state.favorite_images = []
+                    st.success("已清空所有收藏")
+                    time.sleep(1)
+                    rerun_app()
+        
+        st.markdown("---")
+        # 顯示收藏的圖像
+        cols = st.columns(3)
+        # 按時間倒序顯示
+        sorted_favorites = sorted(st.session_state.favorite_images, key=lambda x: x['timestamp'], reverse=True)
+
+        for i, fav in enumerate(sorted_favorites):
+            with cols[i % 3]:
+                display_image_with_actions(fav['image_url'], fav['id'], fav.get('history_item'))
+                
+                # 顯示收藏信息
+                if fav.get('history_item'):
+                    st.caption(f"💭 {fav['history_item']['prompt'][:40]}...")
+                st.caption(f"⭐ 收藏於: {fav['timestamp'].strftime('%Y-%m-%d %H:%M')}")
+    else:
+        st.info("⭐ 尚無收藏圖像，在生成的圖像上點擊 ☆ 按鈕來添加收藏！")
+
+# 頁腳
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #666; margin-top: 2rem;">
+    🚀 <strong>部署在 Koyeb</strong> | 
+    🎨 <strong>Powered by Flux & Generative AI</strong> | 
+    ⚡ <strong>自動縮放</strong> | 
+    🌐 <strong>全球加速</strong>
+    <br><br>
+    <small>完整的圖像生成、模型發現、歷史管理功能</small>
+</div>
+""", unsafe_allow_html=True)
