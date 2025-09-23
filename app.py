@@ -51,12 +51,6 @@ def load_custom_css():
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
     }
     
-    /* 暗色主題卡片 */
-    .dark-card {
-        background: linear-gradient(145deg, #1e293b 0%, #334155 100%);
-        color: white;
-    }
-    
     /* 英雄區塊樣式 */
     .hero-section {
         text-align: center;
@@ -128,8 +122,6 @@ def load_custom_css():
         transition: all 0.3s ease;
         height: 100%;
         text-align: center;
-        position: relative;
-        overflow: hidden;
     }
     
     .model-card:hover {
@@ -219,19 +211,6 @@ def load_custom_css():
         animation: pulse 2s infinite;
     }
     
-    .progress-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        margin-bottom: 1rem;
-        color: #1e293b;
-    }
-    
-    .progress-desc {
-        color: #64748b;
-        font-size: 1.1rem;
-        margin-bottom: 2rem;
-    }
-    
     /* 動畫效果 */
     @keyframes pulse {
         0%, 100% { 
@@ -253,23 +232,8 @@ def load_custom_css():
         }
     }
     
-    @keyframes slideUp {
-        from {
-            opacity: 0;
-            transform: translateY(50px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
     .fade-in {
         animation: fadeIn 0.8s ease-out;
-    }
-    
-    .slide-up {
-        animation: slideUp 0.6s ease-out;
     }
     
     /* 響應式設計 */
@@ -279,12 +243,6 @@ def load_custom_css():
         }
         .hero-subtitle {
             font-size: 1rem;
-        }
-        .feature-card {
-            margin-bottom: 1rem;
-        }
-        .model-card {
-            margin-bottom: 1rem;
         }
     }
     </style>
@@ -313,45 +271,28 @@ def get_heavy_imports():
     
     try:
         try:
-            from openai import OpenAI
-            imports['OpenAI'] = OpenAI
-            logger.info("OpenAI imported successfully")
-        except ImportError as e:
-            logger.warning(f"OpenAI import failed: {e}")
-            imports['OpenAI'] = None
-        
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-            imports['Image'] = Image
-            imports['ImageDraw'] = ImageDraw
-            imports['ImageFont'] = ImageFont
-            logger.info("PIL imported successfully")
-        except ImportError as e:
-            logger.warning(f"PIL import failed: {e}")
-            imports['Image'] = None
-            imports['ImageDraw'] = None
-            imports['ImageFont'] = None
-        
-        try:
             import requests
             imports['requests'] = requests
+            logger.info("Requests imported successfully")
         except ImportError:
             logger.error("Requests import failed")
             imports['requests'] = None
         
         try:
-            from io import BytesIO
-            imports['BytesIO'] = BytesIO
-        except ImportError:
-            logger.error("BytesIO import failed")
-            imports['BytesIO'] = None
-        
-        try:
             import base64
             imports['base64'] = base64
+            logger.info("Base64 imported successfully")
         except ImportError:
             logger.error("Base64 import failed")
             imports['base64'] = None
+        
+        try:
+            import urllib.parse
+            imports['urllib_parse'] = urllib.parse
+            logger.info("Urllib.parse imported successfully")
+        except ImportError:
+            logger.error("Urllib.parse import failed")
+            imports['urllib_parse'] = None
         
         return imports
         
@@ -378,9 +319,8 @@ def go_to_homepage():
     """返回主頁並清除所有狀態"""
     try:
         keys_to_clear = [
-            'selected_provider', 'show_navyai_setup', 'selected_navyai_model',
-            'selected_navyai_category', 'selected_flux_krea_model', 'quick_template',
-            'current_page', 'show_gallery', 'generated_images'
+            'selected_provider', 'selected_flux_krea_model', 'quick_template',
+            'current_page', 'generated_images'
         ]
         for key in keys_to_clear:
             if key in st.session_state:
@@ -401,51 +341,51 @@ def rerun_app():
     else:
         st.stop()
 
-# FLUX Krea 模型庫
+# FLUX Krea 模型庫 - 修復版本
 FLUX_KREA_MODELS = {
-    "flux-krea-dev": {
-        "name": "FLUX Krea Dev",
-        "model_id": "flux-krea",
-        "description": "平衡質量與速度的美學優化版本，適合日常創作使用",
+    "flux-dev": {
+        "name": "FLUX Dev",
+        "model_id": "flux",
+        "description": "高質量圖像生成模型，平衡質量與速度",
         "pricing": "免費",
         "speed": "~6-8s",
         "quality": 5,
         "recommended": True,
-        "speciality": "平衡性能",
+        "speciality": "通用生成",
         "best_for": ["人像攝影", "風景攝影", "日常創作"],
         "icon": "🎭",
         "color": "#3b82f6"
     },
-    "flux-krea-pro": {
-        "name": "FLUX Krea Pro",
-        "model_id": "flux-krea-pro",
-        "description": "專業級美學優化，提供最高質量輸出，適合商業創作",
+    "stable-diffusion": {
+        "name": "Stable Diffusion",
+        "model_id": "turbo",
+        "description": "穩定擴散模型，快速生成高質量圖像",
         "pricing": "免費",
-        "speed": "~8-10s",
-        "quality": 5,
-        "recommended": True,
-        "speciality": "最高質量",
-        "best_for": ["專業攝影", "商業創作", "藝術作品"],
-        "icon": "👑",
-        "color": "#7c3aed"
-    },
-    "flux-krea-schnell": {
-        "name": "FLUX Krea Schnell",
-        "model_id": "flux-krea-schnell",
-        "description": "快速版本，在保持美學質量的同時提升生成速度",
-        "pricing": "免費",
-        "speed": "~3-5s",
+        "speed": "~4-6s",
         "quality": 4,
-        "recommended": False,
-        "speciality": "極速生成",
-        "best_for": ["快速原型", "批量生成", "測試創意"],
+        "recommended": True,
+        "speciality": "快速生成",
+        "best_for": ["快速原型", "概念設計", "創意測試"],
         "icon": "⚡",
         "color": "#f59e0b"
     },
-    "flux-krea-realism": {
-        "name": "FLUX Krea Realism",
-        "model_id": "flux-realism",
-        "description": "專注寫實風格，適合需要高度真實感的圖像創作",
+    "playground": {
+        "name": "Playground",
+        "model_id": "playground",
+        "description": "實驗性模型，提供創新的圖像風格",
+        "pricing": "免費",
+        "speed": "~5-7s",
+        "quality": 4,
+        "recommended": False,
+        "speciality": "創新風格",
+        "best_for": ["藝術創作", "風格實驗", "創意探索"],
+        "icon": "🎪",
+        "color": "#ec4899"
+    },
+    "realistic": {
+        "name": "Realistic",
+        "model_id": "realistic",
+        "description": "專注寫實風格的圖像生成",
         "pricing": "免費",
         "speed": "~7-9s",
         "quality": 5,
@@ -455,10 +395,10 @@ FLUX_KREA_MODELS = {
         "icon": "📸",
         "color": "#059669"
     },
-    "flux-krea-anime": {
-        "name": "FLUX Krea Anime",
-        "model_id": "flux-anime",
-        "description": "動漫風格優化，專門生成高質量的動漫插畫風格圖像",
+    "anime": {
+        "name": "Anime Style",
+        "model_id": "anime",
+        "description": "動漫風格專精模型",
         "pricing": "免費",
         "speed": "~6-8s",
         "quality": 4,
@@ -466,12 +406,12 @@ FLUX_KREA_MODELS = {
         "speciality": "動漫風格",
         "best_for": ["動漫角色", "插畫創作", "二次元風格"],
         "icon": "🎌",
-        "color": "#ec4899"
+        "color": "#8b5cf6"
     },
-    "flux-krea-artistic": {
-        "name": "FLUX Krea Artistic",
-        "model_id": "flux-artistic",
-        "description": "藝術創作優化，強化創意表現和藝術風格渲染",
+    "artistic": {
+        "name": "Artistic",
+        "model_id": "artistic",
+        "description": "藝術風格優化模型",
         "pricing": "免費",
         "speed": "~8-10s",
         "quality": 5,
@@ -483,147 +423,137 @@ FLUX_KREA_MODELS = {
     }
 }
 
-# FLUX Krea 預設
+# FLUX Krea 預設 - 修復版本
 FLUX_KREA_PRESETS = {
     "portrait": {
         "name": "🖼️ 人像攝影",
         "prompt_prefix": "professional portrait photography, ",
-        "prompt_suffix": ", natural lighting, realistic skin texture, detailed eyes, high resolution",
+        "prompt_suffix": ", natural lighting, realistic skin texture, detailed eyes, high resolution, masterpiece",
         "color": "#f59e0b"
     },
     "landscape": {
         "name": "🌄 風景攝影",
         "prompt_prefix": "beautiful landscape photography, ",
-        "prompt_suffix": ", golden hour lighting, natural colors, scenic view, high detail",
+        "prompt_suffix": ", golden hour lighting, natural colors, scenic view, high detail, cinematic",
         "color": "#059669"
     },
     "artistic": {
         "name": "🎨 藝術創作",
         "prompt_prefix": "artistic composition, ",
-        "prompt_suffix": ", creative lighting, artistic style, detailed artwork, masterpiece",
+        "prompt_suffix": ", creative lighting, artistic style, detailed artwork, masterpiece, fine art",
         "color": "#dc2626"
     },
     "realistic": {
         "name": "📸 寫實風格",
         "prompt_prefix": "photorealistic, ",
-        "prompt_suffix": ", natural appearance, realistic details, authentic style, lifelike",
+        "prompt_suffix": ", natural appearance, realistic details, authentic style, lifelike, 8k quality",
         "color": "#6b7280"
     }
 }
 
-# 數據庫管理器
-class KoyebOptimizedProviderManager:
-    def __init__(self):
-        self.db_path = "/tmp/koyeb_providers.db" if KOYEB_ENV else "koyeb_providers.db"
-        self.init_database()
-    
-    def init_database(self):
-        """數據庫初始化"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS koyeb_api_keys (
-                    id TEXT PRIMARY KEY,
-                    provider TEXT NOT NULL,
-                    key_name TEXT NOT NULL,
-                    api_key TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1
-                )
-            ''')
-            conn.commit()
-            conn.close()
-            logger.info("Database initialized successfully")
-        except Exception as e:
-            logger.error(f"Database initialization failed: {str(e)}")
-    
-    def save_api_key(self, provider, key_name, api_key):
-        """保存 API 密鑰"""
-        key_id = str(uuid.uuid4())[:8]
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE koyeb_api_keys SET is_active = 0 WHERE provider = ?", (provider,))
-            cursor.execute('''
-                INSERT INTO koyeb_api_keys (id, provider, key_name, api_key)
-                VALUES (?, ?, ?, ?)
-            ''', (key_id, provider, key_name, api_key))
-            conn.commit()
-            conn.close()
-            return key_id
-        except Exception as e:
-            logger.error(f"API key save failed: {str(e)}")
-            return ""
-    
-    def get_active_api_key(self, provider):
-        """獲取活動密鑰"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT id, key_name, api_key, created_at
-                FROM koyeb_api_keys 
-                WHERE provider = ? AND is_active = 1
-                ORDER BY created_at DESC LIMIT 1
-            ''', (provider,))
-            row = cursor.fetchone()
-            conn.close()
-            if row:
-                return {'id': row[0], 'key_name': row[1], 'api_key': row[2], 'created_at': row[3]}
-            return None
-        except Exception as e:
-            logger.error(f"Key retrieval failed: {str(e)}")
-            return None
-
-@st.cache_resource
-def get_provider_manager():
-    return KoyebOptimizedProviderManager()
-
-provider_manager = get_provider_manager()
-
-# 圖像生成函數
-def generate_flux_krea_image(prompt, model_id="flux-krea", preset="realistic", size="1024x1024"):
-    """FLUX Krea 圖像生成"""
+# 修復的圖像生成函數 [web:350][web:356][web:362]
+def generate_flux_krea_image_fixed(prompt, model_id="flux", preset="realistic", size="1024x1024"):
+    """修復版本的 FLUX Krea 圖像生成 - 使用 Pollinations.ai API"""
     imports = get_heavy_imports()
-    if not imports.get('requests') or not imports.get('base64'):
-        return False, "缺少必要的模組 (requests, base64)"
+    
+    # 檢查必要的模組
+    if not imports.get('requests') or not imports.get('urllib_parse') or not imports.get('base64'):
+        return False, "缺少必要的模組 (requests, urllib.parse, base64)"
     
     try:
-        prompt = safe_text(prompt, max_length=500)
+        # 安全處理提示詞
+        prompt = safe_text(prompt, max_length=800)
+        
+        # 應用預設優化
         preset_config = FLUX_KREA_PRESETS.get(preset, FLUX_KREA_PRESETS["realistic"])
         optimized_prompt = f"{preset_config['prompt_prefix']}{prompt}{preset_config['prompt_suffix']}"
         
-        import urllib.parse
-        encoded_prompt = urllib.parse.quote(optimized_prompt)
-        width, height = map(int, size.split('x'))
+        # URL 編碼提示詞
+        encoded_prompt = imports['urllib_parse'].quote(optimized_prompt)
         
-        url_params = [
-            f"model={model_id}",
-            f"width={width}",
-            f"height={height}",
-            "nologo=true",
-            "enhance=true"
-        ]
+        # 解析圖像尺寸
+        try:
+            width, height = map(int, size.split('x'))
+        except:
+            width, height = 1024, 1024
         
+        # 構建 Pollinations.ai API URL [web:356][web:359]
+        api_params = []
+        
+        # 添加模型參數
+        if model_id and model_id != "flux":
+            api_params.append(f"model={model_id}")
+        
+        # 添加尺寸參數
+        api_params.append(f"width={width}")
+        api_params.append(f"height={height}")
+        
+        # 添加質量參數
+        api_params.append("nologo=true")  # 移除 logo
+        api_params.append("enhance=true")  # 增強質量
+        api_params.append("private=false")  # 公開模式
+        
+        # 構建完整 URL
         base_url = "https://image.pollinations.ai/prompt"
-        full_url = f"{base_url}/{encoded_prompt}?{'&'.join(url_params)}"
+        param_string = "&".join(api_params)
+        full_url = f"{base_url}/{encoded_prompt}?{param_string}"
         
-        logger.info(f"FLUX Krea API call: {model_id}")
-        response = imports['requests'].get(full_url, timeout=45)
+        logger.info(f"Pollinations API call: {full_url[:100]}...")
         
-        if response.status_code == 200:
-            encoded_image = imports['base64'].b64encode(response.content).decode()
-            image_url = f"data:image/png;base64,{encoded_image}"
-            logger.info("FLUX Krea generation successful")
-            return True, image_url
-        else:
-            return False, f"HTTP {response.status_code}"
+        # 發送請求 - 增加超時和重試機制
+        headers = {
+            'User-Agent': 'AI-Image-Studio-Pro/1.0',
+            'Accept': 'image/*'
+        }
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = imports['requests'].get(
+                    full_url, 
+                    timeout=60,  # 增加超時時間
+                    headers=headers,
+                    stream=True
+                )
+                
+                if response.status_code == 200:
+                    # 檢查內容類型
+                    content_type = response.headers.get('content-type', '')
+                    if 'image' in content_type:
+                        # 編碼圖像為 base64
+                        encoded_image = imports['base64'].b64encode(response.content).decode()
+                        image_url = f"data:image/png;base64,{encoded_image}"
+                        logger.info(f"Pollinations generation successful on attempt {attempt + 1}")
+                        return True, image_url
+                    else:
+                        logger.warning(f"Unexpected content type: {content_type}")
+                        if attempt == max_retries - 1:
+                            return False, f"接收到非圖像內容: {content_type}"
+                else:
+                    logger.warning(f"HTTP {response.status_code} on attempt {attempt + 1}")
+                    if attempt == max_retries - 1:
+                        return False, f"HTTP錯誤 {response.status_code}"
+                
+            except imports['requests'].exceptions.Timeout:
+                logger.warning(f"Request timeout on attempt {attempt + 1}")
+                if attempt == max_retries - 1:
+                    return False, "請求超時，請稍後重試"
+                    
+            except imports['requests'].exceptions.RequestException as e:
+                logger.warning(f"Request exception on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    return False, f"網絡錯誤: {safe_text(str(e))}"
+            
+            # 重試前等待
+            if attempt < max_retries - 1:
+                time.sleep(2)
+        
+        return False, "所有重試均失敗"
             
     except Exception as e:
         error_msg = safe_text(str(e))
-        logger.error(f"FLUX Krea generation error: {error_msg}")
-        return False, error_msg
+        logger.error(f"Pollinations generation error: {error_msg}")
+        return False, f"生成錯誤: {error_msg}"
 
 # 現代化 UI 組件
 def show_modern_hero():
@@ -632,11 +562,11 @@ def show_modern_hero():
     <div class="hero-section fade-in">
         <div class="hero-title">🎨 AI Image Studio Pro</div>
         <div class="hero-subtitle">
-            專業級 AI 圖像生成平台 • FLUX Krea 美學優化 • NavyAI 統一接口 • 全球高性能部署
+            專業級 AI 圖像生成平台 • FLUX Krea 美學優化 • Pollinations.ai 免費 API
         </div>
         <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 2rem;">
-            <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">🎭 6種 FLUX 模型</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">⚓ 真實 API 調用</span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">🎭 6種 AI 模型</span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">🆓 完全免費</span>
             <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">🚀 Koyeb 部署</span>
             <span style="background: rgba(255,255,255,0.2); padding: 0.75rem 1.5rem; border-radius: 25px; color: white; font-weight: 600;">✨ 現代化界面</span>
         </div>
@@ -655,7 +585,7 @@ def show_system_status():
         status = "✅ 正常" if imports.get('requests') else "❌ 錯誤"
         color = "success" if imports.get('requests') else "error"
         st.markdown(f"""
-        <div class="modern-card text-center slide-up" style="animation-delay: 0.1s;">
+        <div class="modern-card text-center">
             <div style="font-size: 2.5rem; margin-bottom: 1rem;">🌐</div>
             <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">網絡請求</div>
             <div class="status-indicator {color}">{status}</div>
@@ -663,23 +593,23 @@ def show_system_status():
         """, unsafe_allow_html=True)
     
     with col2:
-        status = "✅ 正常" if imports.get('Image') else "❌ 錯誤"
-        color = "success" if imports.get('Image') else "error"
+        status = "✅ 正常" if imports.get('urllib_parse') else "❌ 錯誤"
+        color = "success" if imports.get('urllib_parse') else "error"
         st.markdown(f"""
-        <div class="modern-card text-center slide-up" style="animation-delay: 0.2s;">
-            <div style="font-size: 2.5rem; margin-bottom: 1rem;">🖼️</div>
-            <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">圖像處理</div>
+        <div class="modern-card text-center">
+            <div style="font-size: 2.5rem; margin-bottom: 1rem;">🔗</div>
+            <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">URL 處理</div>
             <div class="status-indicator {color}">{status}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        status = "✅ 正常" if imports.get('OpenAI') else "⚠️ 回退"
-        color = "success" if imports.get('OpenAI') else "warning"
+        status = "✅ 正常" if imports.get('base64') else "❌ 錯誤"
+        color = "success" if imports.get('base64') else "error"
         st.markdown(f"""
-        <div class="modern-card text-center slide-up" style="animation-delay: 0.3s;">
-            <div style="font-size: 2.5rem; margin-bottom: 1rem;">🤖</div>
-            <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">OpenAI 接口</div>
+        <div class="modern-card text-center">
+            <div style="font-size: 2.5rem; margin-bottom: 1rem;">📊</div>
+            <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">編碼處理</div>
             <div class="status-indicator {color}">{status}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -687,7 +617,7 @@ def show_system_status():
     with col4:
         env_status = "🌍 生產環境" if KOYEB_ENV else "💻 開發環境"
         st.markdown(f"""
-        <div class="modern-card text-center slide-up" style="animation-delay: 0.4s;">
+        <div class="modern-card text-center">
             <div style="font-size: 2.5rem; margin-bottom: 1rem;">🚀</div>
             <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">部署狀態</div>
             <div class="status-indicator success">{env_status}</div>
@@ -696,83 +626,55 @@ def show_system_status():
 
 def show_provider_selection():
     """顯示服務提供商選擇"""
-    st.markdown("### 🎯 選擇 AI 圖像生成服務")
+    st.markdown("### 🎯 AI 圖像生成工作室")
+    st.markdown("使用 Pollinations.ai 免費 API，體驗專業級 AI 圖像生成")
     
-    col1, col2 = st.columns(2, gap="large")
-    
-    with col1:
-        st.markdown("""
-        <div class="feature-card slide-up" style="animation-delay: 0.1s;">
-            <div class="feature-icon">🎭</div>
-            <div class="feature-title">FLUX Krea AI Studio</div>
-            <div class="feature-desc">
-                <strong>🎨 6種專業模型選擇</strong><br><br>
-                • <strong>Dev & Pro</strong>：平衡性能與最高質量<br>
-                • <strong>Schnell</strong>：極速生成，快如閃電<br>
-                • <strong>Realism</strong>：寫實風格專精<br>
-                • <strong>Anime</strong>：動漫插畫專家<br>
-                • <strong>Artistic</strong>：藝術創作優化<br><br>
-                ✅ 完全免費使用<br>
-                🚀 Koyeb 高性能部署<br>
-                🎯 美學算法優化
-            </div>
+    st.markdown("""
+    <div class="feature-card fade-in">
+        <div class="feature-icon">🎭</div>
+        <div class="feature-title">FLUX Krea AI Studio</div>
+        <div class="feature-desc">
+            <strong>🎨 6種專業 AI 模型</strong><br><br>
+            • <strong>FLUX Dev</strong>：高質量通用生成<br>
+            • <strong>Stable Diffusion</strong>：快速穩定生成<br>
+            • <strong>Playground</strong>：創新實驗風格<br>
+            • <strong>Realistic</strong>：寫實風格專精<br>
+            • <strong>Anime</strong>：動漫插畫專家<br>
+            • <strong>Artistic</strong>：藝術創作優化<br><br>
+            ✅ 完全免費使用 • 🌍 Pollinations.ai 驅動 • 🚀 Koyeb 高性能部署
         </div>
-        """, unsafe_allow_html=True)
-        
-        if st.button("🎭 啟動 FLUX Krea Studio", type="primary", use_container_width=True):
-            st.session_state.selected_provider = "FLUX Krea AI"
-            st.session_state.current_page = "flux_krea"
-            st.success("✅ FLUX Krea AI Studio 已啟動")
-            st.balloons()
-            time.sleep(1)
-            rerun_app()
+    </div>
+    """, unsafe_allow_html=True)
     
-    with col2:
-        st.markdown("""
-        <div class="feature-card slide-up" style="animation-delay: 0.2s;">
-            <div class="feature-icon">⚓</div>
-            <div class="feature-title">NavyAI 統一接口</div>
-            <div class="feature-desc">
-                <strong>🔗 真實 OpenAI 兼容 API</strong><br><br>
-                • <strong>DALL-E 3</strong>：OpenAI 最新模型<br>
-                • <strong>DALL-E 2</strong>：經典穩定版本<br>
-                • <strong>統一接口</strong>：一個 API 多個模型<br><br>
-                🌍 真實雲端生成<br>
-                🛡️ 自動回退保護<br>
-                💰 按使用付費<br>
-                📊 專業級質量
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if st.button("⚓ 配置 NavyAI 接口", use_container_width=True):
-            st.session_state.current_page = "navyai_setup"
-            rerun_app()
+    if st.button("🎨 啟動 AI Image Studio", type="primary", use_container_width=True, key="start_studio"):
+        st.session_state.current_page = "flux_krea"
+        st.success("✅ AI Image Studio 已啟動")
+        st.balloons()
+        time.sleep(1)
+        rerun_app()
 
 def show_flux_krea_studio():
-    """FLUX Krea Studio 界面"""
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 6, 1])
+    """修復版本的 FLUX Krea Studio 界面"""
+    col_nav1, col_nav2 = st.columns([1, 6])
     with col_nav1:
-        if st.button("← 回到主頁", use_container_width=True):
+        if st.button("← 回到主頁", use_container_width=True, key="home_from_studio"):
             go_to_homepage()
     with col_nav2:
-        st.markdown("### 🎭 FLUX Krea AI Studio - 專業美學圖像生成平台")
-    with col_nav3:
-        if st.button("🖼️ 作品集", use_container_width=True):
-            st.session_state.show_gallery = True
+        st.markdown("### 🎨 AI Image Studio - 專業圖像生成平台")
     
     # 檢查依賴
     imports = get_heavy_imports()
-    if not imports.get('requests') or not imports.get('base64'):
-        st.error("⚠️ 系統依賴不完整，FLUX Krea Studio 暫時不可用")
-        col_back, _ = st.columns([1, 1])
-        with col_back:
-            if st.button("🏠 返回主頁", type="primary", use_container_width=True):
-                go_to_homepage()
+    if not all([imports.get('requests'), imports.get('urllib_parse'), imports.get('base64')]):
+        st.error("⚠️ 系統依賴不完整，請檢查網絡連接")
+        if st.button("🏠 返回主頁", type="primary", use_container_width=True, key="home_error"):
+            go_to_homepage()
         return
     
+    # API 狀態檢查
+    st.info("🌍 使用 Pollinations.ai 免費 API - 無需註冊或密鑰")
+    
     # 模型選擇區
-    st.markdown("#### 🤖 選擇 FLUX Krea 專業模型")
+    st.markdown("#### 🤖 選擇 AI 圖像生成模型")
     
     # 推薦模型
     st.markdown("##### ⭐ 推薦模型")
@@ -787,7 +689,7 @@ def show_flux_krea_studio():
             card_class = "model-card selected" if is_selected else "model-card"
             
             st.markdown(f"""
-            <div class="{card_class} slide-up" style="animation-delay: {0.1 + i*0.1}s;">
+            <div class="{card_class}">
                 <div class="model-icon" style="color: {model_info['color']};">{model_info['icon']}</div>
                 <div class="model-name">{model_info['name']}</div>
                 <div class="model-desc">{model_info['description']}</div>
@@ -799,14 +701,14 @@ def show_flux_krea_studio():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"選擇 {model_info['name']}", key=f"rec_flux_{model_key}", use_container_width=True, type="primary"):
+            if st.button(f"選擇 {model_info['name']}", key=f"rec_{model_key}", use_container_width=True, type="primary"):
                 st.session_state.selected_flux_krea_model = model_info
                 selected_model = model_info
                 st.success(f"✅ 已選擇 {model_info['name']}")
                 time.sleep(0.5)
                 rerun_app()
     
-    # 專業模型
+    # 其他模型
     st.markdown("##### 🛠️ 專業模型")
     other_models = {k: v for k, v in FLUX_KREA_MODELS.items() if not v['recommended']}
     
@@ -817,7 +719,7 @@ def show_flux_krea_studio():
             card_class = "model-card selected" if is_selected else "model-card"
             
             st.markdown(f"""
-            <div class="{card_class} slide-up" style="animation-delay: {0.3 + i*0.1}s;">
+            <div class="{card_class}">
                 <div class="model-icon" style="color: {model_info['color']};">{model_info['icon']}</div>
                 <div class="model-name">{model_info['name']}</div>
                 <div class="model-desc">{model_info['description']}</div>
@@ -825,7 +727,7 @@ def show_flux_krea_studio():
             </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"選擇", key=f"sel_flux_{model_key}", use_container_width=True):
+            if st.button("選擇", key=f"sel_{model_key}", use_container_width=True):
                 st.session_state.selected_flux_krea_model = model_info
                 st.success(f"✅ 已選擇 {model_info['name']}")
                 time.sleep(0.5)
@@ -840,17 +742,17 @@ def show_flux_krea_studio():
         
         # 已選擇模型顯示
         st.markdown(f"""
-        <div class="modern-card fade-in" style="background: linear-gradient(135deg, {selected_model['color']} 0%, {selected_model['color']}80 100%); color: white;">
+        <div class="modern-card fade-in" style="background: linear-gradient(135deg, {selected_model['color']}20 0%, {selected_model['color']}10 100%); border-left: 4px solid {selected_model['color']};">
             <div style="display: flex; align-items: center; gap: 1.5rem;">
                 <div style="font-size: 3rem;">{selected_model['icon']}</div>
                 <div>
-                    <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem;">
+                    <div style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; color: {selected_model['color']};">
                         ✅ 已選擇: {selected_model['name']}
                     </div>
-                    <div style="opacity: 0.9; font-size: 1rem; margin-bottom: 0.5rem;">
+                    <div style="color: #64748b; font-size: 1rem; margin-bottom: 0.5rem;">
                         {selected_model['description']}
                     </div>
-                    <div style="display: flex; gap: 1rem; font-size: 0.9rem; opacity: 0.8;">
+                    <div style="display: flex; gap: 1rem; font-size: 0.9rem; color: #64748b;">
                         <span>🎯 {selected_model['speciality']}</span>
                         <span>⚡ {selected_model['speed']}</span>
                         <span>⭐ {'★' * selected_model['quality']}</span>
@@ -867,44 +769,42 @@ def show_flux_krea_studio():
             st.markdown("#### ✍️ 創作提示詞")
             
             prompt = st.text_area(
-                "輸入您的創意描述:",
+                "描述您想要生成的圖像:",
                 height=140,
-                placeholder=f"例如：A professional portrait of a confident woman, natural lighting...\n\n當前使用 {selected_model['name']}，擅長 {selected_model['speciality']}",
-                help=f"💡 {selected_model['name']} 最適合: {', '.join(selected_model['best_for'])}"
+                placeholder=f"例如：A beautiful sunset over mountains, golden hour lighting...\n\n當前使用 {selected_model['name']} 模型",
+                help=f"💡 {selected_model['name']} 最適合: {', '.join(selected_model['best_for'])}",
+                key="main_prompt"
             )
             
             # 智能模板建議
             st.markdown("##### 🎨 智能模板建議")
             
-            if "realism" in selected_model['model_id']:
+            if "realistic" in selected_model['model_id']:
                 templates = [
-                    "A professional business portrait with natural lighting and realistic details",
-                    "Product photography on white background with commercial studio lighting"
+                    "A professional business portrait with natural lighting",
+                    "Product photography on white background, studio lighting"
                 ]
             elif "anime" in selected_model['model_id']:
                 templates = [
-                    "Beautiful anime girl character with flowing hair, detailed eyes, vibrant colors",
-                    "Fantasy anime warrior in magical forest with dynamic pose and epic lighting"
+                    "Beautiful anime girl with flowing hair and detailed eyes",
+                    "Fantasy anime warrior in magical forest"
                 ]
             elif "artistic" in selected_model['model_id']:
                 templates = [
-                    "Abstract expressionist painting with bold brushstrokes and vibrant palette",
-                    "Surreal dreamscape with floating objects and impossible architecture"
+                    "Abstract art with bold colors and geometric shapes",
+                    "Surreal landscape with floating objects"
                 ]
             else:
                 templates = [
-                    "Professional portrait photography with natural lighting and skin texture",
-                    "Golden hour landscape photography with natural colors and atmosphere"
+                    "Professional portrait with natural lighting",
+                    "Beautiful landscape at golden hour"
                 ]
             
             template_cols = st.columns(2)
             for i, template in enumerate(templates):
                 with template_cols[i % 2]:
-                    template_preview = template[:45] + "..." if len(template) > 45 else template
-                    if st.button(f"💡 {template_preview}", key=f"template_{i}", use_container_width=True):
+                    if st.button(f"💡 {template[:35]}...", key=f"template_{i}", use_container_width=True):
                         st.session_state.quick_template = template
-                        st.success("✅ 模板已應用")
-                        time.sleep(0.5)
                         rerun_app()
         
         with col_settings:
@@ -919,68 +819,56 @@ def show_flux_krea_studio():
                 "選擇預設風格:",
                 range(len(preset_names)),
                 format_func=lambda x: preset_names[x],
-                index=0
+                index=0,
+                key="preset_select"
             )
             selected_preset = preset_options[selected_preset_idx]
             
             # 生成參數
             st.markdown("##### 📐 圖像參數")
             size_options = ["512x512", "768x768", "1024x1024", "1152x896", "896x1152"]
-            selected_size = st.selectbox("圖像尺寸:", size_options, index=2)
+            selected_size = st.selectbox("圖像尺寸:", size_options, index=2, key="size_select")
             
             # 模型特性展示
-            st.markdown(f"""
-            <div class="modern-card dark-card">
-                <div style="text-align: center;">
-                    <div style="font-size: 2.5rem; margin-bottom: 1rem;">{selected_model['icon']}</div>
-                    <div style="font-weight: 700; font-size: 1.2rem; margin-bottom: 0.5rem;">
-                        {selected_model['name']}
-                    </div>
-                    <div style="margin-bottom: 1rem; opacity: 0.9;">
-                        {selected_model['speciality']}
-                    </div>
-                    <div style="font-size: 0.95rem; opacity: 0.8; line-height: 1.6;">
-                        <div>質量等級: {'★' * selected_model['quality']}</div>
-                        <div>生成速度: {selected_model['speed']}</div>
-                        <div style="margin-top: 0.5rem;">
-                            <strong>最適合場景:</strong><br>
-                            {' • '.join(selected_model['best_for'])}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.success(f"**{selected_model['icon']} {selected_model['name']}**")
+            st.caption(f"專長: {selected_model['speciality']}")
+            st.caption(f"質量: {'★' * selected_model['quality']}")
+            st.caption(f"速度: {selected_model['speed']}")
         
         # 檢查快速模板
         if hasattr(st.session_state, 'quick_template'):
+            # 直接更新文本框需要重新運行
             prompt = st.session_state.quick_template
             del st.session_state.quick_template
-            rerun_app()
+            
+            # 由於 Streamlit 的限制，我們顯示模板內容
+            st.info(f"💡 已應用模板: {prompt}")
         
         st.markdown("---")
         
         # 生成按鈕
-        can_generate = prompt.strip() and selected_model
+        can_generate = prompt and prompt.strip() and selected_model
         
         col_generate, col_clear, col_back = st.columns([4, 1, 1])
         with col_generate:
             if st.button(
-                f"🎨 {selected_model['icon']} 開始專業創作",
+                f"🎨 {selected_model['icon']} 開始生成圖像",
                 type="primary",
                 disabled=not can_generate,
-                use_container_width=True
+                use_container_width=True,
+                key="generate_btn"
             ):
                 if can_generate:
-                    generate_flux_krea_main(selected_model, prompt, selected_preset, selected_size)
+                    generate_image_main(selected_model, prompt, selected_preset, selected_size)
         
         with col_clear:
-            if st.button("🔄 重置", use_container_width=True):
+            if st.button("🔄 重置", use_container_width=True, key="clear_btn"):
                 if 'selected_flux_krea_model' in st.session_state:
                     del st.session_state.selected_flux_krea_model
                 rerun_app()
         
         with col_back:
-            if st.button("🏠 主頁", use_container_width=True):
+            if st.button("🏠 主頁", use_container_width=True, key="home_btn"):
                 go_to_homepage()
     
     else:
@@ -988,16 +876,26 @@ def show_flux_krea_studio():
         <div class="modern-card text-center fade-in" style="padding: 4rem 2rem;">
             <div style="font-size: 4rem; margin-bottom: 2rem;">🤖</div>
             <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; color: #1e293b;">
-                請選擇一個 FLUX Krea 專業模型
+                請選擇一個 AI 圖像生成模型
             </div>
             <div style="color: #64748b; font-size: 1.1rem; line-height: 1.6; max-width: 500px; margin: 0 auto;">
-                每個模型都經過專門優化，擁有獨特的專長領域。
+                每個模型都有獨特的專長領域，選擇最適合您創作需求的模型開始生成。
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-def generate_flux_krea_main(selected_model, prompt, preset, size):
-    """FLUX Krea 主生成流程"""
+def generate_image_main(selected_model, prompt, preset, size):
+    """主圖像生成流程 - 修復版本"""
+    # 使用模板內容（如果存在）
+    if hasattr(st.session_state, 'quick_template'):
+        prompt = st.session_state.quick_template
+        del st.session_state.quick_template
+    
+    if not prompt or not prompt.strip():
+        st.error("❌ 請輸入有效的提示詞")
+        return
+    
+    # 現代化進度界面
     progress_container = st.empty()
     
     with progress_container.container():
@@ -1006,11 +904,11 @@ def generate_flux_krea_main(selected_model, prompt, preset, size):
             <div class="progress-icon" style="color: {selected_model['color']};">
                 {selected_model['icon']}
             </div>
-            <div class="progress-title">
-                {selected_model['name']} 正在創作中...
+            <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; color: #1e293b;">
+                {selected_model['name']} 正在生成中...
             </div>
-            <div class="progress-desc">
-                請稍候，AI 正在運用 {selected_model['speciality']} 為您生成專業級圖像
+            <div style="color: #64748b; font-size: 1.1rem; margin-bottom: 2rem;">
+                使用 Pollinations.ai API，專業級 {selected_model['speciality']} 生成
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1019,63 +917,112 @@ def generate_flux_krea_main(selected_model, prompt, preset, size):
         status_text = st.empty()
         
         stages = [
-            f"{selected_model['icon']} 初始化 {selected_model['name']} 美學引擎...",
-            f"✨ 應用 {selected_model['speciality']} 專業優化...",
-            f"🎨 處理創意提示詞與美學預設...",
-            f"🌈 生成專業級色彩與光影方案...",
-            f"🔮 {selected_model['name']} 深度渲染處理中...",
-            f"🎉 創作完成！{selected_model['name']} 專業作品已生成"
+            f"{selected_model['icon']} 連接 Pollinations.ai API...",
+            f"📝 優化提示詞與 {selected_model['speciality']} 參數...",
+            f"🎨 {selected_model['name']} 模型處理中...",
+            f"🖼️ 生成 {size} 高質量圖像...",
+            f"📡 從雲端接收圖像數據...",
+            f"🎉 {selected_model['name']} 生成完成！"
         ]
         
         for i, stage in enumerate(stages):
             status_text.info(stage)
-            time.sleep(0.8)
+            # 根據模型調整進度時間
+            if "turbo" in selected_model['model_id']:
+                time.sleep(0.6)  # 快速模型
+            else:
+                time.sleep(1.0)   # 標準時間
             progress_bar.progress((i + 1) / len(stages))
     
-    success, result = generate_flux_krea_image(prompt, selected_model['model_id'], preset, size)
+    # 執行圖像生成
+    success, result = generate_flux_krea_image_fixed(prompt, selected_model['model_id'], preset, size)
     
     progress_container.empty()
     
     if success:
-        st.success(f"🎉 {selected_model['icon']} {selected_model['name']} 創作完成！")
+        st.success(f"🎉 {selected_model['icon']} {selected_model['name']} 生成完成！")
         st.balloons()
         
+        # 作品展示
         st.markdown(f"""
         <div style="text-align: center; margin: 2rem 0 1rem 0;">
             <h3 style="color: {selected_model['color']}; font-size: 1.8rem; margin: 0;">
                 🖼️ {selected_model['name']} 專業作品
             </h3>
+            <p style="color: #64748b; margin-top: 0.5rem;">
+                {selected_model['speciality']} • {FLUX_KREA_PRESETS[preset]['name']} • {size}
+            </p>
         </div>
         """, unsafe_allow_html=True)
         
+        # 圖像展示
         st.image(
             result, 
             use_column_width=True, 
-            caption=f"由 {selected_model['name']} 生成 • 風格: {FLUX_KREA_PRESETS[preset]['name']}"
+            caption=f"由 {selected_model['name']} 生成 • 風格: {FLUX_KREA_PRESETS[preset]['name']} • 提示詞: {prompt[:80]}..."
         )
         
-        col_download, col_regen, col_home = st.columns([2, 2, 1])
+        # 生成詳情
+        with st.expander(f"🔍 {selected_model['name']} 生成詳情", expanded=False):
+            col_model_info, col_generation_info = st.columns(2)
+            
+            with col_model_info:
+                st.markdown("**🤖 模型信息**")
+                st.write(f"**名稱**: {selected_model['name']}")
+                st.write(f"**專長**: {selected_model['speciality']}")
+                st.write(f"**質量等級**: {'★' * selected_model['quality']}")
+                st.write(f"**生成速度**: {selected_model['speed']}")
+                st.write(f"**最適合**: {', '.join(selected_model['best_for'])}")
+            
+            with col_generation_info:
+                st.markdown("**🎨 生成信息**")
+                preset_config = FLUX_KREA_PRESETS[preset]
+                st.write(f"**美學預設**: {preset_config['name']}")
+                st.write(f"**圖像尺寸**: {size}")
+                st.write(f"**API 服務**: Pollinations.ai")
+                st.write(f"**生成時間**: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                st.write(f"**提示詞長度**: {len(prompt)} 字符")
+        
+        # 操作按鈕
+        col_download, col_regen, col_new, col_home = st.columns(4)
         
         with col_download:
-            if st.button("📥 下載作品", use_container_width=True):
-                st.info("💡 右鍵點擊圖像選擇「另存為」")
+            if st.button("📥 下載圖像", use_container_width=True, key="download_btn"):
+                st.success("💡 請右鍵點擊圖像選擇「另存為」")
         
         with col_regen:
-            if st.button("🔄 重新生成", use_container_width=True):
-                generate_flux_krea_main(selected_model, prompt, preset, size)
+            if st.button("🔄 重新生成", use_container_width=True, key="regen_btn"):
+                generate_image_main(selected_model, prompt, preset, size)
+        
+        with col_new:
+            if st.button("✨ 新作品", use_container_width=True, key="new_btn"):
+                if 'selected_flux_krea_model' in st.session_state:
+                    del st.session_state.selected_flux_krea_model
+                rerun_app()
         
         with col_home:
-            if st.button("🏠 主頁", use_container_width=True):
+            if st.button("🏠 回到主頁", use_container_width=True, key="home_result_btn"):
                 go_to_homepage()
                 
     else:
-        st.error(f"❌ {selected_model['name']} 生成失敗: {result}")
-        col_retry, col_home = st.columns([3, 1])
+        st.error(f"❌ {selected_model['name']} 生成失敗")
+        
+        st.markdown(f"""
+        <div class="modern-card" style="border-left: 4px solid #dc2626;">
+            <h4 style="color: #dc2626; margin-bottom: 1rem;">🚨 生成錯誤</h4>
+            <p><strong>錯誤信息</strong>: {result}</p>
+            <p><strong>使用模型</strong>: {selected_model['name']}</p>
+            <p><strong>API 服務</strong>: Pollinations.ai</p>
+            <p><strong>提示詞長度</strong>: {len(prompt)} 字符</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col_retry, col_home_error = st.columns([3, 1])
         with col_retry:
-            if st.button("🔄 重試生成", type="primary", use_container_width=True):
-                generate_flux_krea_main(selected_model, prompt, preset, size)
-        with col_home:
-            if st.button("🏠 主頁", use_container_width=True):
+            if st.button("🔄 重試生成", type="primary", use_container_width=True, key="retry_btn"):
+                generate_image_main(selected_model, prompt, preset, size)
+        with col_home_error:
+            if st.button("🏠 返回主頁", use_container_width=True, key="home_error_btn"):
                 go_to_homepage()
 
 # 初始化會話狀態
@@ -1085,7 +1032,7 @@ def init_session_state():
         st.session_state.current_page = 'home'
 
 def main():
-    """主程式"""
+    """主程式 - 修復版本"""
     try:
         load_custom_css()
         init_session_state()
@@ -1095,23 +1042,24 @@ def main():
             st.markdown("### 🎨 AI Image Studio Pro")
             st.markdown("---")
             
-            if st.button("🏠 主頁", use_container_width=True):
+            if st.button("🏠 主頁", use_container_width=True, key="sidebar_home"):
                 st.session_state.current_page = 'home'
                 rerun_app()
             
-            if st.button("🎭 FLUX Krea Studio", use_container_width=True):
+            if st.button("🎨 圖像工作室", use_container_width=True, key="sidebar_studio"):
                 st.session_state.current_page = 'flux_krea'
                 rerun_app()
             
             st.markdown("---")
             st.markdown("### ℹ️ 系統信息")
+            st.success("🌍 Pollinations.ai 免費 API")
             if KOYEB_ENV:
-                st.success("🌍 Koyeb 生產環境")
+                st.success("🚀 Koyeb 生產環境")
             else:
                 st.info("💻 本地開發環境")
             
             st.caption(f"端口: {PORT}")
-            st.caption("版本: v8.0 修復版")
+            st.caption("版本: v9.0 修復版")
         
         # 主內容區域
         current_page = st.session_state.get('current_page', 'home')
@@ -1134,15 +1082,15 @@ def main():
         st.markdown("""
         <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); border-radius: 12px; margin-top: 3rem;">
             <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; color: #1e293b;">
-                🚀 AI Image Studio Pro - Powered by Koyeb
+                🚀 AI Image Studio Pro - Powered by Pollinations.ai & Koyeb
             </div>
             <div style="color: #64748b; margin-bottom: 1rem;">
-                專業級 AI 圖像生成平台 • FLUX Krea 美學優化 • 全球 CDN 加速
+                專業級 AI 圖像生成平台 • 免費 API • 6種專業模型 • 全球高性能部署
             </div>
             <div style="font-size: 0.9rem; color: #94a3b8;">
+                API 服務: Pollinations.ai | 
                 運行環境: {'🌍 Koyeb Production' if KOYEB_ENV else '💻 Local Development'} | 
-                版本: v8.0 修復版 | 
-                構建時間: 2025-09-23
+                版本: v9.0 修復版
             </div>
         </div>
         """, unsafe_allow_html=True)
