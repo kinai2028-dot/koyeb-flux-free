@@ -28,21 +28,104 @@ def rerun_app():
 
 # 設定頁面配置
 st.set_page_config(
-    page_title="Flux AI & SD Generator Pro - 完整版",
+    page_title="Flux & SD Generator Pro - 自設供應商版",
     page_icon="🎨",
     layout="wide"
 )
 
-# 簡化的密鑰管理系統
-class SimpleKeyManager:
+# 預設模型供應商配置
+DEFAULT_MODEL_PROVIDERS = {
+    "Navy": {
+        "name": "Navy AI",
+        "icon": "⚓",
+        "description": "Navy 高性能 AI 圖像生成服務",
+        "api_type": "openai_compatible",
+        "base_url": "https://api.navy/v1",
+        "key_prefix": "sk-",
+        "features": ["flux", "stable-diffusion"],
+        "pricing": "按使用量計費",
+        "speed": "快速",
+        "quality": "高質量",
+        "is_custom": False
+    },
+    "OpenAI Compatible": {
+        "name": "OpenAI Compatible",
+        "icon": "🤖",
+        "description": "標準 OpenAI 格式兼容服務",
+        "api_type": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "key_prefix": "sk-",
+        "features": ["dall-e", "custom-models"],
+        "pricing": "官方定價",
+        "speed": "中等",
+        "quality": "官方品質",
+        "is_custom": False
+    },
+    "Hugging Face": {
+        "name": "Hugging Face",
+        "icon": "🤗",
+        "description": "開源模型推理平台",
+        "api_type": "huggingface",
+        "base_url": "https://api-inference.huggingface.co",
+        "key_prefix": "hf_",
+        "features": ["flux", "stable-diffusion", "community-models"],
+        "pricing": "免費/付費層級",
+        "speed": "可變",
+        "quality": "社區驅動",
+        "is_custom": False
+    },
+    "Together AI": {
+        "name": "Together AI",
+        "icon": "🤝",
+        "description": "高性能開源模型平台",
+        "api_type": "openai_compatible",
+        "base_url": "https://api.together.xyz/v1",
+        "key_prefix": "",
+        "features": ["flux", "stable-diffusion", "llama"],
+        "pricing": "競爭性定價",
+        "speed": "極快",
+        "quality": "優秀",
+        "is_custom": False
+    }
+}
+
+# 自定義供應商和模型管理系統
+class CustomProviderManager:
     def __init__(self):
-        self.db_path = "simple_keys.db"
+        self.db_path = "custom_providers.db"
         self.init_database()
     
     def init_database(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # 自定義供應商表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS custom_providers (
+                id TEXT PRIMARY KEY,
+                provider_name TEXT UNIQUE NOT NULL,
+                display_name TEXT NOT NULL,
+                icon TEXT DEFAULT '🔧',
+                description TEXT,
+                api_type TEXT DEFAULT 'openai_compatible',
+                base_url TEXT NOT NULL,
+                key_prefix TEXT DEFAULT '',
+                features TEXT DEFAULT '',
+                pricing TEXT DEFAULT '自定義定價',
+                speed TEXT DEFAULT '未知',
+                quality TEXT DEFAULT '未知',
+                headers TEXT DEFAULT '{}',
+                auth_type TEXT DEFAULT 'bearer',
+                timeout INTEGER DEFAULT 30,
+                max_retries INTEGER DEFAULT 3,
+                rate_limit INTEGER DEFAULT 60,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1
+            )
+        ''')
+        
+        # API 密鑰表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS api_keys (
                 id TEXT PRIMARY KEY,
@@ -57,27 +140,168 @@ class SimpleKeyManager:
             )
         ''')
         
+        # 供應商模型表
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS discovered_models (
+            CREATE TABLE IF NOT EXISTS provider_models (
                 id TEXT PRIMARY KEY,
-                model_name TEXT UNIQUE NOT NULL,
                 provider TEXT NOT NULL,
-                category TEXT,
+                model_name TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                category TEXT CHECK(category IN ('flux', 'stable-diffusion')) NOT NULL,
                 description TEXT,
                 icon TEXT,
                 priority INTEGER DEFAULT 999,
                 endpoint_path TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                model_type TEXT,
+                expected_size TEXT,
+                pricing_tier TEXT,
+                performance_rating INTEGER DEFAULT 3,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(provider, model_id)
             )
         ''')
         
         conn.commit()
         conn.close()
     
+    def save_custom_provider(self, **kwargs) -> str:
+        """保存自定義供應商"""
+        provider_id = str(uuid.uuid4())
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO custom_providers 
+                (id, provider_name, display_name, icon, description, api_type, base_url, 
+                 key_prefix, features, pricing, speed, quality, headers, auth_type, 
+                 timeout, max_retries, rate_limit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                provider_id,
+                kwargs.get('provider_name', ''),
+                kwargs.get('display_name', ''),
+                kwargs.get('icon', '🔧'),
+                kwargs.get('description', ''),
+                kwargs.get('api_type', 'openai_compatible'),
+                kwargs.get('base_url', ''),
+                kwargs.get('key_prefix', ''),
+                json.dumps(kwargs.get('features', [])),
+                kwargs.get('pricing', '自定義定價'),
+                kwargs.get('speed', '未知'),
+                kwargs.get('quality', '未知'),
+                json.dumps(kwargs.get('headers', {})),
+                kwargs.get('auth_type', 'bearer'),
+                kwargs.get('timeout', 30),
+                kwargs.get('max_retries', 3),
+                kwargs.get('rate_limit', 60)
+            ))
+            
+            conn.commit()
+            conn.close()
+            return provider_id
+            
+        except sqlite3.IntegrityError:
+            conn.close()
+            return None
+    
+    def get_custom_providers(self) -> List[Dict]:
+        """獲取自定義供應商列表"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, provider_name, display_name, icon, description, api_type, base_url,
+                   key_prefix, features, pricing, speed, quality, headers, auth_type,
+                   timeout, max_retries, rate_limit, is_active
+            FROM custom_providers
+            WHERE is_active = 1
+            ORDER BY display_name
+        ''')
+        
+        providers = []
+        for row in cursor.fetchall():
+            providers.append({
+                'id': row[0],
+                'provider_name': row[1],
+                'display_name': row[2],
+                'icon': row[3],
+                'description': row[4],
+                'api_type': row[5],
+                'base_url': row[6],
+                'key_prefix': row[7],
+                'features': json.loads(row[8]) if row[8] else [],
+                'pricing': row[9],
+                'speed': row[10],
+                'quality': row[11],
+                'headers': json.loads(row[12]) if row[12] else {},
+                'auth_type': row[13],
+                'timeout': row[14],
+                'max_retries': row[15],
+                'rate_limit': row[16],
+                'is_active': bool(row[17]),
+                'is_custom': True
+            })
+        
+        conn.close()
+        return providers
+    
+    def get_all_providers(self) -> Dict[str, Dict]:
+        """獲取所有供應商（預設+自定義）"""
+        all_providers = DEFAULT_MODEL_PROVIDERS.copy()
+        
+        custom_providers = self.get_custom_providers()
+        for provider in custom_providers:
+            all_providers[provider['provider_name']] = provider
+        
+        return all_providers
+    
+    def delete_custom_provider(self, provider_id: str):
+        """刪除自定義供應商"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 軟刪除
+        cursor.execute("UPDATE custom_providers SET is_active = 0 WHERE id = ?", (provider_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def update_custom_provider(self, provider_id: str, **kwargs):
+        """更新自定義供應商"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        update_fields = []
+        values = []
+        
+        for field, value in kwargs.items():
+            if field in ['display_name', 'icon', 'description', 'api_type', 'base_url', 
+                        'key_prefix', 'pricing', 'speed', 'quality', 'auth_type']:
+                update_fields.append(f"{field} = ?")
+                values.append(value)
+            elif field in ['features', 'headers']:
+                update_fields.append(f"{field} = ?")
+                values.append(json.dumps(value))
+            elif field in ['timeout', 'max_retries', 'rate_limit']:
+                update_fields.append(f"{field} = ?")
+                values.append(int(value))
+        
+        if update_fields:
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(provider_id)
+            
+            query = f"UPDATE custom_providers SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, values)
+            conn.commit()
+        
+        conn.close()
+    
+    # 其他方法保持不變...
     def save_api_key(self, provider: str, key_name: str, api_key: str, base_url: str = "", 
                      notes: str = "", is_default: bool = False) -> str:
         key_id = str(uuid.uuid4())
-        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -123,625 +347,551 @@ class SimpleKeyManager:
         
         conn.close()
         return keys
-    
-    def save_discovered_model(self, model_name: str, provider: str, category: str = "", 
-                             description: str = "", icon: str = "", priority: int = 999,
-                             endpoint_path: str = "") -> str:
-        """保存自動發現的模型"""
-        model_id = str(uuid.uuid4())
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # 檢查是否已存在
-        cursor.execute("SELECT id FROM discovered_models WHERE model_name = ?", (model_name,))
-        if cursor.fetchone():
-            conn.close()
-            return None
-        
-        cursor.execute('''
-            INSERT INTO discovered_models 
-            (id, model_name, provider, category, description, icon, priority, endpoint_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (model_id, model_name, provider, category, description, icon, priority, endpoint_path))
-        
-        conn.commit()
-        conn.close()
-        return model_id
-    
-    def get_discovered_models(self, category: str = None) -> List[Dict]:
-        """獲取發現的模型列表"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        if category:
-            cursor.execute('''
-                SELECT model_name, provider, category, description, icon, priority, endpoint_path
-                FROM discovered_models WHERE category = ?
-                ORDER BY priority, model_name
-            ''', (category,))
-        else:
-            cursor.execute('''
-                SELECT model_name, provider, category, description, icon, priority, endpoint_path
-                FROM discovered_models
-                ORDER BY category, priority, model_name
-            ''')
-        
-        models = []
-        for row in cursor.fetchall():
-            models.append({
-                'model_name': row[0], 'provider': row[1], 'category': row[2],
-                'description': row[3], 'icon': row[4], 'priority': row[5],
-                'endpoint_path': row[6]
-            })
-        
-        conn.close()
-        return models
-    
-    def delete_api_key(self, key_id: str):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
-        conn.commit()
-        conn.close()
-    
-    def update_key_validation(self, key_id: str, validated: bool):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE api_keys SET validated = ? WHERE id = ?", (validated, key_id))
-        conn.commit()
-        conn.close()
 
 # 全局實例
-key_manager = SimpleKeyManager()
+custom_provider_manager = CustomProviderManager()
 
-# API 提供商配置
-API_PROVIDERS = {
-    "Navy": {
-        "name": "Navy API",
-        "base_url_default": "https://api.navy/v1", 
-        "key_prefix": "sk-",
-        "description": "Navy AI 圖像生成服務",
-        "icon": "⚓"
-    },
-    "OpenAI Compatible": {
-        "name": "OpenAI Compatible API",
-        "base_url_default": "https://api.openai.com/v1",
-        "key_prefix": "sk-",
-        "description": "OpenAI 官方或兼容的 API 服務",
-        "icon": "🤖"
-    },
-    "Hugging Face": {
-        "name": "Hugging Face API",
-        "base_url_default": "https://api-inference.huggingface.co",
-        "key_prefix": "hf_",
-        "description": "Hugging Face 推理 API",
-        "icon": "🤗"
-    },
-    "Together AI": {
-        "name": "Together AI",
-        "base_url_default": "https://api.together.xyz/v1",
-        "key_prefix": "",
-        "description": "Together AI 平台",
-        "icon": "🤝"
-    }
-}
-
-# 基礎模型庫
-BASE_MODELS = {
-    "flux-schnell": {
-        "name": "FLUX.1 Schnell",
-        "description": "最快的生成速度，開源模型",
-        "icon": "⚡",
-        "category": "flux",
-        "test_prompt": "A simple cat sitting on a table",
-        "priority": 1
-    },
-    "flux-dev": {
-        "name": "FLUX.1 Dev", 
-        "description": "開發版本，平衡速度與質量",
-        "icon": "🔧",
-        "category": "flux",
-        "test_prompt": "A beautiful landscape with mountains",
-        "priority": 2
-    },
-    "flux-pro": {
-        "name": "FLUX.1 Pro",
-        "description": "專業版本，最佳品質",
-        "icon": "👑",
-        "category": "flux",
-        "test_prompt": "Professional portrait in natural lighting",
-        "priority": 3
-    },
-    "stable-diffusion-xl": {
-        "name": "Stable Diffusion XL",
-        "description": "SDXL 基礎模型，高品質生成",
-        "icon": "🎨",
-        "category": "stable-diffusion",
-        "test_prompt": "A beautiful sunset over mountains",
-        "priority": 10
-    },
-    "stable-diffusion-2-1": {
-        "name": "Stable Diffusion 2.1",
-        "description": "SD 2.1 經典模型",
-        "icon": "🖼️",
-        "category": "stable-diffusion",
-        "test_prompt": "Artistic portrait with dramatic lighting",
-        "priority": 11
-    }
-}
-
-# Hugging Face 模型端點
-HF_MODEL_ENDPOINTS = {
-    "flux": [
-        "black-forest-labs/FLUX.1-schnell",
-        "black-forest-labs/FLUX.1-dev",
-        "XLabs-AI/flux-RealismLora",
-        "multimodalart/FLUX.1-merged"
-    ],
-    "stable-diffusion": [
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        "stabilityai/stable-diffusion-2-1",
-        "runwayml/stable-diffusion-v1-5",
-        "prompthero/openjourney",
-        "wavymulder/Analog-Diffusion"
-    ]
-}
-
-def auto_discover_models_from_api(client, provider: str, api_key: str, base_url: str):
-    """從 API 自動發現模型"""
-    try:
-        if provider == "Hugging Face":
-            # HF 模型發現
-            discovered = []
-            for category, endpoints in HF_MODEL_ENDPOINTS.items():
-                for endpoint in endpoints:
-                    model_name = endpoint.split('/')[-1]
-                    
-                    # 分析模型信息
-                    if "flux" in model_name.lower():
-                        icon = "⚡"
-                        category = "flux"
-                        description = f"Flux model: {model_name}"
-                    elif "stable" in model_name.lower() or "sd" in model_name.lower():
-                        icon = "🎨"
-                        category = "stable-diffusion"
-                        description = f"Stable Diffusion model: {model_name}"
-                    else:
-                        icon = "🤖"
-                        category = "other"
-                        description = f"AI model: {model_name}"
-                    
-                    # 保存到數據庫
-                    model_id = key_manager.save_discovered_model(
-                        model_name=model_name,
-                        provider=provider,
-                        category=category,
-                        description=description,
-                        icon=icon,
-                        priority=999,
-                        endpoint_path=endpoint
-                    )
-                    
-                    if model_id:
-                        discovered.append(model_name)
+def show_custom_provider_creator():
+    """顯示自定義供應商創建器"""
+    st.subheader("🛠️ 創建自定義 API 供應商")
+    
+    with st.form("custom_provider_form"):
+        st.markdown("### 📋 基本信息")
+        
+        col_name, col_display = st.columns(2)
+        
+        with col_name:
+            provider_name = st.text_input(
+                "供應商 ID *",
+                placeholder="例如：my-custom-api",
+                help="唯一標識符，只能包含字母、數字、連字符"
+            )
+        
+        with col_display:
+            display_name = st.text_input(
+                "顯示名稱 *",
+                placeholder="例如：My Custom API",
+                help="在界面中顯示的名稱"
+            )
+        
+        col_icon, col_desc = st.columns([1, 3])
+        
+        with col_icon:
+            icon = st.text_input("圖標", value="🔧", help="單個 Emoji 表情")
+        
+        with col_desc:
+            description = st.text_area(
+                "描述",
+                placeholder="描述此 API 供應商的特色和用途...",
+                height=100
+            )
+        
+        st.markdown("### 🔧 API 配置")
+        
+        col_type, col_url = st.columns(2)
+        
+        with col_type:
+            api_type = st.selectbox(
+                "API 類型 *",
+                ["openai_compatible", "huggingface", "replicate", "custom"],
+                format_func=lambda x: {
+                    "openai_compatible": "OpenAI 兼容格式",
+                    "huggingface": "Hugging Face 格式",
+                    "replicate": "Replicate 格式",
+                    "custom": "自定義格式"
+                }[x]
+            )
+        
+        with col_url:
+            base_url = st.text_input(
+                "API 端點 URL *",
+                placeholder="https://api.example.com/v1",
+                help="完整的 API 基礎 URL"
+            )
+        
+        col_prefix, col_auth = st.columns(2)
+        
+        with col_prefix:
+            key_prefix = st.text_input(
+                "密鑰前綴",
+                placeholder="sk-",
+                help="API 密鑰的前綴格式"
+            )
+        
+        with col_auth:
+            auth_type = st.selectbox(
+                "認證方式",
+                ["bearer", "api_key", "custom"],
+                format_func=lambda x: {
+                    "bearer": "Bearer Token",
+                    "api_key": "API Key Header",
+                    "custom": "自定義認證"
+                }[x]
+            )
+        
+        st.markdown("### 🎯 功能支持")
+        
+        features = st.multiselect(
+            "支持的功能",
+            ["flux", "stable-diffusion", "dall-e", "midjourney", "video-generation", "audio-generation", "custom-models"],
+            format_func=lambda x: {
+                "flux": "⚡ Flux AI 模型",
+                "stable-diffusion": "🎨 Stable Diffusion",
+                "dall-e": "🖼️ DALL-E",
+                "midjourney": "🎭 Midjourney 風格",
+                "video-generation": "🎬 視頻生成",
+                "audio-generation": "🎵 音頻生成",
+                "custom-models": "🔧 自定義模型"
+            }[x]
+        )
+        
+        st.markdown("### 📊 性能指標")
+        
+        col_pricing, col_speed, col_quality = st.columns(3)
+        
+        with col_pricing:
+            pricing = st.text_input("定價模式", placeholder="例如：$0.01/請求")
+        
+        with col_speed:
+            speed = st.selectbox("速度等級", ["極慢", "慢", "中等", "快速", "極快", "未知"])
+        
+        with col_quality:
+            quality = st.selectbox("品質等級", ["低", "中", "高", "優秀", "頂級", "未知"])
+        
+        st.markdown("### 🔧 高級設置")
+        
+        with st.expander("高級配置（可選）"):
+            col_timeout, col_retries, col_rate = st.columns(3)
             
-            return discovered
-        else:
-            # OpenAI Compatible API 模型發現
-            response = client.models.list()
-            discovered = []
+            with col_timeout:
+                timeout = st.number_input("超時時間 (秒)", min_value=5, max_value=300, value=30)
             
-            for model in response.data:
-                model_id = model.id
+            with col_retries:
+                max_retries = st.number_input("最大重試次數", min_value=0, max_value=10, value=3)
+            
+            with col_rate:
+                rate_limit = st.number_input("速率限制 (請求/分鐘)", min_value=1, max_value=1000, value=60)
+            
+            # 自定義請求標頭
+            st.markdown("#### 自定義 HTTP 標頭")
+            custom_headers = {}
+            
+            header_count = st.number_input("標頭數量", min_value=0, max_value=10, value=0)
+            
+            for i in range(int(header_count)):
+                col_header_key, col_header_value = st.columns(2)
                 
-                # 智能分類
-                model_lower = model_id.lower()
-                if any(keyword in model_lower for keyword in ['flux', 'black-forest']):
-                    category = "flux"
-                    icon = "⚡"
-                    description = f"Flux model: {model_id}"
-                elif any(keyword in model_lower for keyword in ['stable', 'diffusion', 'sd']):
-                    category = "stable-diffusion"
-                    icon = "🎨"
-                    description = f"Stable Diffusion model: {model_id}"
+                with col_header_key:
+                    header_key = st.text_input(f"標頭名稱 {i+1}", key=f"header_key_{i}")
+                
+                with col_header_value:
+                    header_value = st.text_input(f"標頭值 {i+1}", key=f"header_value_{i}")
+                
+                if header_key and header_value:
+                    custom_headers[header_key] = header_value
+        
+        # 提交按鈕
+        col_submit, col_test = st.columns(2)
+        
+        with col_submit:
+            submit_button = st.form_submit_button("💾 創建供應商", type="primary", use_container_width=True)
+        
+        with col_test:
+            test_button = st.form_submit_button("🧪 測試配置", use_container_width=True)
+        
+        if submit_button:
+            # 驗證必填字段
+            if not provider_name or not display_name or not base_url:
+                st.error("❌ 請填寫所有必填字段 (*)")
+            elif not re.match(r'^[a-zA-Z0-9-_]+$', provider_name):
+                st.error("❌ 供應商 ID 只能包含字母、數字、連字符和下劃線")
+            else:
+                # 保存自定義供應商
+                provider_data = {
+                    'provider_name': provider_name,
+                    'display_name': display_name,
+                    'icon': icon,
+                    'description': description,
+                    'api_type': api_type,
+                    'base_url': base_url,
+                    'key_prefix': key_prefix,
+                    'features': features,
+                    'pricing': pricing,
+                    'speed': speed,
+                    'quality': quality,
+                    'headers': custom_headers,
+                    'auth_type': auth_type,
+                    'timeout': timeout,
+                    'max_retries': max_retries,
+                    'rate_limit': rate_limit
+                }
+                
+                provider_id = custom_provider_manager.save_custom_provider(**provider_data)
+                
+                if provider_id:
+                    st.success(f"✅ 自定義供應商 '{display_name}' 創建成功！")
+                    st.info(f"🆔 供應商 ID: {provider_id[:8]}...")
+                    time.sleep(1)
+                    rerun_app()
                 else:
-                    category = "other"
-                    icon = "🤖"
-                    description = f"AI model: {model_id}"
-                
-                # 保存模型
-                saved_id = key_manager.save_discovered_model(
-                    model_name=model_id,
-                    provider=provider,
-                    category=category,
-                    description=description,
-                    icon=icon,
-                    priority=999
-                )
-                
-                if saved_id:
-                    discovered.append(model_id)
-            
-            return discovered
-    
-    except Exception as e:
-        st.error(f"模型發現失敗: {str(e)}")
-        return []
+                    st.error(f"❌ 創建失敗：供應商 ID '{provider_name}' 已存在")
+        
+        elif test_button:
+            if not base_url:
+                st.error("❌ 請填寫 API 端點 URL")
+            else:
+                # 測試配置
+                with st.spinner("🧪 測試 API 配置..."):
+                    test_result = test_custom_api_config(base_url, api_type, custom_headers, auth_type, timeout)
+                    
+                    if test_result['success']:
+                        st.success(f"✅ {test_result['message']}")
+                        if test_result.get('additional_info'):
+                            st.info(f"ℹ️ {test_result['additional_info']}")
+                    else:
+                        st.error(f"❌ {test_result['message']}")
 
-def get_all_available_models():
-    """獲取所有可用模型（基礎+發現的）"""
-    all_models = BASE_MODELS.copy()
-    
-    # 添加發現的模型
-    discovered = key_manager.get_discovered_models()
-    for model in discovered:
-        model_key = model['model_name']
-        all_models[model_key] = {
-            "name": model['model_name'],
-            "description": model['description'],
-            "icon": model['icon'],
-            "category": model['category'],
-            "test_prompt": "A beautiful detailed image",
-            "priority": model['priority'],
-            "endpoint_path": model.get('endpoint_path', ''),
-            "source": "discovered"
+def test_custom_api_config(base_url: str, api_type: str, headers: Dict, auth_type: str, timeout: int) -> Dict:
+    """測試自定義 API 配置"""
+    try:
+        test_headers = headers.copy()
+        
+        # 根據認證方式添加測試標頭
+        if auth_type == "bearer":
+            test_headers["Authorization"] = "Bearer test_token"
+        elif auth_type == "api_key":
+            test_headers["X-API-Key"] = "test_api_key"
+        
+        # 嘗試連接 API
+        if api_type == "openai_compatible":
+            # 測試 OpenAI 兼容端點
+            test_url = f"{base_url.rstrip('/')}/models"
+        elif api_type == "huggingface":
+            # 測試 HuggingFace 端點
+            test_url = f"{base_url.rstrip('/')}/models"
+        else:
+            # 通用測試
+            test_url = base_url.rstrip('/')
+        
+        response = requests.get(test_url, headers=test_headers, timeout=timeout)
+        
+        if response.status_code == 200:
+            return {
+                'success': True,
+                'message': f"API 端點連接成功 (HTTP {response.status_code})",
+                'additional_info': f"響應時間: {response.elapsed.total_seconds():.2f}s"
+            }
+        elif response.status_code == 401:
+            return {
+                'success': True,
+                'message': "API 端點可訪問，但需要有效認證",
+                'additional_info': "這是正常的，請確保您有有效的 API 密鑰"
+            }
+        elif response.status_code == 403:
+            return {
+                'success': True,
+                'message': "API 端點可訪問，但權限受限",
+                'additional_info': "請檢查 API 密鑰權限"
+            }
+        else:
+            return {
+                'success': False,
+                'message': f"API 返回異常狀態碼: {response.status_code}"
+            }
+            
+    except requests.exceptions.Timeout:
+        return {
+            'success': False,
+            'message': f"連接超時（{timeout}秒）"
         }
+    except requests.exceptions.ConnectionError:
+        return {
+            'success': False,
+            'message': "無法連接到 API 端點，請檢查 URL 是否正確"
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'message': f"測試失敗: {str(e)[:100]}"
+        }
+
+def show_custom_provider_manager():
+    """顯示自定義供應商管理器"""
+    st.subheader("🔧 自定義供應商管理")
     
-    return all_models
+    custom_providers = custom_provider_manager.get_custom_providers()
+    
+    if not custom_providers:
+        st.info("📭 尚未創建任何自定義供應商")
+        st.markdown("點擊下方按鈕創建您的第一個自定義供應商。")
+        return
+    
+    st.info(f"📊 已創建 {len(custom_providers)} 個自定義供應商")
+    
+    for provider in custom_providers:
+        with st.container():
+            # 供應商信息展示
+            col_info, col_actions = st.columns([3, 1])
+            
+            with col_info:
+                st.markdown(f"### {provider['icon']} {provider['display_name']}")
+                st.caption(f"**ID**: `{provider['provider_name']}` | **類型**: {provider['api_type']}")
+                
+                if provider['description']:
+                    st.markdown(f"**描述**: {provider['description']}")
+                
+                st.markdown(f"**端點**: `{provider['base_url']}`")
+                
+                # 功能標籤
+                if provider['features']:
+                    features_text = " ".join([f"`{feature}`" for feature in provider['features']])
+                    st.markdown(f"**功能**: {features_text}")
+                
+                # 性能指標
+                st.markdown(f"**定價**: {provider['pricing']} | **速度**: {provider['speed']} | **品質**: {provider['quality']}")
+            
+            with col_actions:
+                # 編輯按鈕
+                if st.button("✏️ 編輯", key=f"edit_{provider['id']}", use_container_width=True):
+                    st.session_state.editing_provider = provider
+                    rerun_app()
+                
+                # 測試按鈕
+                if st.button("🧪 測試", key=f"test_{provider['id']}", use_container_width=True):
+                    with st.spinner("測試中..."):
+                        test_result = test_custom_api_config(
+                            provider['base_url'],
+                            provider['api_type'],
+                            provider['headers'],
+                            provider['auth_type'],
+                            provider['timeout']
+                        )
+                        
+                        if test_result['success']:
+                            st.success(f"✅ {test_result['message']}")
+                        else:
+                            st.error(f"❌ {test_result['message']}")
+                
+                # 刪除按鈕
+                if st.button("🗑️ 刪除", key=f"delete_{provider['id']}", use_container_width=True):
+                    if st.session_state.get(f"confirm_delete_{provider['id']}", False):
+                        custom_provider_manager.delete_custom_provider(provider['id'])
+                        st.success(f"已刪除供應商: {provider['display_name']}")
+                        rerun_app()
+                    else:
+                        st.session_state[f"confirm_delete_{provider['id']}"] = True
+                        st.warning("再次點擊確認刪除")
+            
+            st.markdown("---")
+
+def show_provider_editor():
+    """顯示供應商編輯器"""
+    if 'editing_provider' not in st.session_state:
+        return
+    
+    provider = st.session_state.editing_provider
+    
+    st.subheader(f"✏️ 編輯供應商: {provider['display_name']}")
+    
+    with st.form("edit_provider_form"):
+        # 基本信息（供應商 ID 不可編輯）
+        st.text_input("供應商 ID", value=provider['provider_name'], disabled=True)
+        
+        display_name = st.text_input("顯示名稱", value=provider['display_name'])
+        
+        col_icon, col_desc = st.columns([1, 3])
+        
+        with col_icon:
+            icon = st.text_input("圖標", value=provider['icon'])
+        
+        with col_desc:
+            description = st.text_area("描述", value=provider['description'], height=100)
+        
+        # API 配置
+        col_type, col_url = st.columns(2)
+        
+        with col_type:
+            api_type = st.selectbox(
+                "API 類型",
+                ["openai_compatible", "huggingface", "replicate", "custom"],
+                index=["openai_compatible", "huggingface", "replicate", "custom"].index(provider['api_type'])
+            )
+        
+        with col_url:
+            base_url = st.text_input("API 端點 URL", value=provider['base_url'])
+        
+        # 功能支持
+        features = st.multiselect(
+            "支持的功能",
+            ["flux", "stable-diffusion", "dall-e", "midjourney", "video-generation", "audio-generation", "custom-models"],
+            default=provider['features']
+        )
+        
+        # 性能指標
+        col_pricing, col_speed, col_quality = st.columns(3)
+        
+        with col_pricing:
+            pricing = st.text_input("定價模式", value=provider['pricing'])
+        
+        with col_speed:
+            speed_options = ["極慢", "慢", "中等", "快速", "極快", "未知"]
+            speed_index = speed_options.index(provider['speed']) if provider['speed'] in speed_options else 5
+            speed = st.selectbox("速度等級", speed_options, index=speed_index)
+        
+        with col_quality:
+            quality_options = ["低", "中", "高", "優秀", "頂級", "未知"]
+            quality_index = quality_options.index(provider['quality']) if provider['quality'] in quality_options else 5
+            quality = st.selectbox("品質等級", quality_options, index=quality_index)
+        
+        # 提交按鈕
+        col_save, col_cancel = st.columns(2)
+        
+        with col_save:
+            save_button = st.form_submit_button("💾 保存更改", type="primary", use_container_width=True)
+        
+        with col_cancel:
+            cancel_button = st.form_submit_button("❌ 取消", use_container_width=True)
+        
+        if save_button:
+            # 更新供應商信息
+            update_data = {
+                'display_name': display_name,
+                'icon': icon,
+                'description': description,
+                'api_type': api_type,
+                'base_url': base_url,
+                'features': features,
+                'pricing': pricing,
+                'speed': speed,
+                'quality': quality
+            }
+            
+            custom_provider_manager.update_custom_provider(provider['id'], **update_data)
+            st.success(f"✅ 供應商 '{display_name}' 已更新")
+            
+            del st.session_state.editing_provider
+            rerun_app()
+        
+        elif cancel_button:
+            del st.session_state.editing_provider
+            rerun_app()
 
 def validate_api_key(api_key: str, base_url: str, provider: str) -> Tuple[bool, str]:
     """驗證 API 密鑰是否有效"""
     try:
-        if provider == "Hugging Face":
+        all_providers = custom_provider_manager.get_all_providers()
+        provider_info = all_providers.get(provider, {})
+        api_type = provider_info.get("api_type", "openai_compatible")
+        
+        if api_type == "huggingface":
             headers = {"Authorization": f"Bearer {api_key}"}
             test_url = f"{base_url}/models/stabilityai/stable-diffusion-xl-base-1.0"
             response = requests.get(test_url, headers=headers, timeout=10)
-            return response.status_code == 200, "HF API 驗證" + ("成功" if response.status_code == 200 else f"失敗 ({response.status_code})")
-        else:
+            return response.status_code == 200, f"{provider} API 驗證" + ("成功" if response.status_code == 200 else f"失敗 ({response.status_code})")
+        elif api_type == "replicate":
+            headers = {"Authorization": f"Token {api_key}"}
+            test_url = f"{base_url}/models"
+            response = requests.get(test_url, headers=headers, timeout=10)
+            return response.status_code == 200, f"{provider} API 驗證" + ("成功" if response.status_code == 200 else f"失敗 ({response.status_code})")
+        else:  # openai_compatible or custom
             test_client = OpenAI(api_key=api_key, base_url=base_url)
             response = test_client.models.list()
-            return True, "API 密鑰驗證成功"
+            return True, f"{provider} API 密鑰驗證成功"
     except Exception as e:
         error_msg = str(e)
         if "401" in error_msg:
-            return False, "API 密鑰無效或已過期"
+            return False, f"{provider} API 密鑰無效或已過期"
         elif "403" in error_msg:
-            return False, "API 密鑰權限不足"
+            return False, f"{provider} API 密鑰權限不足"
         elif "404" in error_msg:
-            return False, "API 端點不存在"
+            return False, f"{provider} API 端點不存在"
         elif "timeout" in error_msg.lower():
-            return False, "API 連接超時"
+            return False, f"{provider} API 連接超時"
         else:
-            return False, f"驗證失敗: {error_msg[:50]}"
+            return False, f"{provider} 驗證失敗: {error_msg[:50]}"
 
-def generate_images_with_retry(client, provider: str, api_key: str, base_url: str, **params) -> Tuple[bool, any]:
-    """帶重試機制的圖像生成"""
-    max_retries = 2
+def show_provider_selector():
+    """顯示供應商選擇器（包含自定義供應商）"""
+    st.subheader("🏢 選擇 API 供應商")
     
-    for attempt in range(max_retries):
-        try:
-            if provider == "Hugging Face":
-                # HF API 調用
-                headers = {"Authorization": f"Bearer {api_key}"}
-                data = {"inputs": params.get("prompt", "")}
-                
-                model_name = params.get("model", "stable-diffusion-xl")
-                all_models = get_all_available_models()
-                model_info = all_models.get(model_name, {})
-                endpoint_path = model_info.get('endpoint_path', f"stabilityai/{model_name}")
-                
-                response = requests.post(
-                    f"{base_url}/models/{endpoint_path}",
-                    headers=headers,
-                    json=data,
-                    timeout=60
-                )
-                
-                if response.status_code == 200:
-                    # 模擬 OpenAI 響應格式
-                    class MockResponse:
-                        def __init__(self, image_data):
-                            encoded_image = base64.b64encode(image_data).decode()
-                            self.data = [type('obj', (object,), {
-                                'url': f"data:image/png;base64,{encoded_image}"
-                            })()]
+    # 獲取所有供應商
+    all_providers = custom_provider_manager.get_all_providers()
+    
+    # 分類顯示
+    default_providers = {k: v for k, v in all_providers.items() if not v.get('is_custom', False)}
+    custom_providers = {k: v for k, v in all_providers.items() if v.get('is_custom', False)}
+    
+    # 預設供應商
+    if default_providers:
+        st.markdown("### 🏭 預設供應商")
+        
+        cols = st.columns(3)
+        for i, (provider_key, provider_info) in enumerate(default_providers.items()):
+            with cols[i % 3]:
+                with st.container():
+                    st.markdown(f"#### {provider_info['icon']} {provider_info['name']}")
+                    st.caption(provider_info['description'])
                     
-                    return True, MockResponse(response.content)
-                else:
-                    raise Exception(f"HTTP {response.status_code}: HF API 調用失敗")
-            else:
-                # OpenAI Compatible API 調用
-                response = client.images.generate(**params)
-                return True, response
-        
-        except Exception as e:
-            if attempt < max_retries - 1:
-                st.warning(f"第 {attempt + 1} 次嘗試失敗，正在重試...")
-                time.sleep(2)
-                continue
-            else:
-                return False, str(e)
-    
-    return False, "所有重試均失敗"
-
-def display_image_with_actions(image_url: str, image_id: str, history_item: Dict = None):
-    """顯示圖像和操作按鈕"""
-    try:
-        # 處理不同類型的圖像 URL
-        if image_url.startswith('data:image'):
-            # Base64 圖像
-            base64_data = image_url.split(',')[1]
-            img_data = base64.b64decode(base64_data)
-            img = Image.open(BytesIO(img_data))
-        else:
-            # 普通 URL
-            img_response = requests.get(image_url, timeout=10)
-            img = Image.open(BytesIO(img_response.content))
-            img_data = img_response.content
-        
-        # 顯示圖像
-        st.image(img, use_column_width=True)
-        
-        # 操作按鈕
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # 下載按鈕
-            img_buffer = BytesIO()
-            img.save(img_buffer, format='PNG')
-            st.download_button(
-                label="📥 下載",
-                data=img_buffer.getvalue(),
-                file_name=f"generated_{image_id}.png",
-                mime="image/png",
-                key=f"download_{image_id}",
-                use_container_width=True
-            )
-        
-        with col2:
-            # 收藏按鈕
-            is_favorite = any(fav['id'] == image_id for fav in st.session_state.favorite_images)
-            if st.button(
-                "⭐ 已收藏" if is_favorite else "☆ 收藏",
-                key=f"favorite_{image_id}",
-                use_container_width=True
-            ):
-                if is_favorite:
-                    st.session_state.favorite_images = [
-                        fav for fav in st.session_state.favorite_images if fav['id'] != image_id
-                    ]
-                    st.success("已取消收藏")
-                else:
-                    favorite_item = {
-                        "id": image_id,
-                        "image_url": image_url,
-                        "timestamp": datetime.datetime.now(),
-                        "history_item": history_item
-                    }
-                    st.session_state.favorite_images.append(favorite_item)
-                    st.success("已加入收藏")
-                rerun_app()
-        
-        with col3:
-            # 重新生成按鈕
-            if history_item and st.button(
-                "🔄 重新生成",
-                key=f"regenerate_{image_id}",
-                use_container_width=True
-            ):
-                st.session_state.regenerate_prompt = history_item['prompt']
-                st.session_state.regenerate_model = history_item['model']
-                rerun_app()
-    
-    except Exception as e:
-        st.error(f"圖像顯示錯誤: {str(e)}")
-
-def show_key_manager():
-    """密鑰管理界面"""
-    st.subheader("🔐 API 密鑰管理")
-    
-    management_mode = st.radio(
-        "操作模式:",
-        ["💾 保存密鑰", "📋 管理密鑰", "🔍 發現模型"],
-        horizontal=True
-    )
-    
-    if management_mode == "💾 保存密鑰":
-        col_provider, col_name = st.columns(2)
-        
-        with col_provider:
-            save_provider = st.selectbox(
-                "選擇提供商:",
-                list(API_PROVIDERS.keys()),
-                format_func=lambda x: f"{API_PROVIDERS[x]['icon']} {API_PROVIDERS[x]['name']}"
-            )
-        
-        with col_name:
-            key_name = st.text_input("密鑰名稱:", placeholder="例如：主要密鑰")
-        
-        provider_info = API_PROVIDERS[save_provider]
-        new_api_key = st.text_input(
-            "API 密鑰:",
-            type="password",
-            placeholder=f"輸入 {provider_info['name']} 的 API 密鑰..."
-        )
-        
-        save_base_url = st.text_input(
-            "API 端點:",
-            value=provider_info['base_url_default']
-        )
-        
-        notes = st.text_area("備註:", height=60)
-        is_default = st.checkbox("設為默認密鑰")
-        
-        if st.button("💾 保存密鑰", type="primary"):
-            if key_name and new_api_key:
-                key_id = key_manager.save_api_key(
-                    save_provider, key_name, new_api_key, 
-                    save_base_url, notes, is_default
-                )
-                st.success(f"✅ 密鑰已保存！ID: {key_id[:8]}...")
-                rerun_app()
-            else:
-                st.error("❌ 請填寫完整信息")
-    
-    elif management_mode == "📋 管理密鑰":
-        all_keys = key_manager.get_api_keys()
-        if not all_keys:
-            st.info("📭 尚未保存任何密鑰")
-            return
-        
-        for key_info in all_keys:
-            with st.container():
-                st.markdown(f"### {API_PROVIDERS.get(key_info['provider'], {}).get('icon', '🔧')} {key_info['key_name']}")
-                
-                col_info, col_actions = st.columns([2, 1])
-                
-                with col_info:
-                    st.markdown(f"**提供商**: {key_info['provider']}")
-                    st.markdown(f"**狀態**: {'🟢 已驗證' if key_info['validated'] else '🟡 未驗證'}")
-                    if key_info['notes']:
-                        st.markdown(f"**備註**: {key_info['notes']}")
-                
-                with col_actions:
-                    if st.button("✅ 使用", key=f"use_{key_info['id']}"):
-                        st.session_state.api_config = {
-                            'provider': key_info['provider'],
-                            'api_key': key_info['api_key'],
-                            'base_url': key_info['base_url'],
-                            'validated': key_info['validated'],
-                            'key_name': key_info['key_name']
-                        }
-                        st.success(f"已載入: {key_info['key_name']}")
+                    # 特色標籤
+                    if 'features' in provider_info:
+                        features_text = " | ".join([f"🏷️ {feature}" for feature in provider_info['features']])
+                        st.markdown(f"**特色**: {features_text}")
+                    
+                    # 選擇按鈕
+                    if st.button(f"選擇 {provider_info['name']}", key=f"select_default_{provider_key}", use_container_width=True):
+                        st.session_state.selected_provider = provider_key
+                        st.success(f"已選擇 {provider_info['name']}")
                         rerun_app()
-                
-                st.markdown("---")
     
-    else:  # 發現模型
-        st.markdown("### 🔍 自動模型發現")
+    # 自定義供應商
+    if custom_providers:
+        st.markdown("### 🔧 自定義供應商")
         
-        if st.session_state.api_config.get('api_key'):
-            config = st.session_state.api_config
-            
-            if st.button("🔍 開始發現模型", type="primary"):
-                with st.spinner("正在發現新模型..."):
-                    if config['provider'] == "Hugging Face":
-                        client = None
-                    else:
-                        client = OpenAI(
-                            api_key=config['api_key'],
-                            base_url=config['base_url']
-                        )
+        cols = st.columns(3)
+        for i, (provider_key, provider_info) in enumerate(custom_providers.items()):
+            with cols[i % 3]:
+                with st.container():
+                    st.markdown(f"#### {provider_info['icon']} {provider_info['display_name']}")
+                    st.caption(provider_info['description'] or "自定義 API 供應商")
                     
-                    discovered = auto_discover_models_from_api(
-                        client, config['provider'], 
-                        config['api_key'], config['base_url']
-                    )
+                    # API 類型和端點
+                    st.caption(f"**類型**: {provider_info['api_type']} | **端點**: {provider_info['base_url'][:30]}...")
                     
-                    if discovered:
-                        st.success(f"✅ 發現 {len(discovered)} 個新模型！")
-                        for model in discovered[:5]:  # 顯示前5個
-                            st.write(f"• {model}")
-                    else:
-                        st.info("ℹ️ 未發現新模型")
-        else:
-            st.warning("請先配置 API 密鑰")
-        
-        # 顯示已發現的模型
-        st.markdown("### 📋 已發現的模型")
-        discovered_models = key_manager.get_discovered_models()
-        
-        if discovered_models:
-            # 按類別分組
-            categories = {}
-            for model in discovered_models:
-                cat = model['category']
-                if cat not in categories:
-                    categories[cat] = []
-                categories[cat].append(model)
-            
-            for category, models in categories.items():
-                st.markdown(f"#### {category.title()} ({len(models)} 個模型)")
-                for model in models[:3]:  # 每類顯示前3個
-                    st.write(f"{model['icon']} {model['name']} - {model['description']}")
-        else:
-            st.info("尚未發現任何模型")
-
-def show_api_settings():
-    """API 設置界面"""
-    st.subheader("🔑 API 設置")
+                    # 特色標籤
+                    if provider_info['features']:
+                        features_text = " | ".join([f"🏷️ {feature}" for feature in provider_info['features']])
+                        st.markdown(f"**功能**: {features_text}")
+                    
+                    # 選擇按鈕
+                    if st.button(f"選擇 {provider_info['display_name']}", key=f"select_custom_{provider_key}", use_container_width=True):
+                        st.session_state.selected_provider = provider_key
+                        st.success(f"已選擇 {provider_info['display_name']}")
+                        rerun_app()
+    else:
+        st.markdown("### 🔧 自定義供應商")
+        st.info("尚未創建任何自定義供應商")
     
-    # 密鑰管理器開關
-    show_manager = st.checkbox("🔐 顯示密鑰管理", value=False)
-    if show_manager:
-        show_key_manager()
-        st.markdown("---")
+    # 管理按鈕
+    st.markdown("---")
+    col_create, col_manage = st.columns(2)
     
-    # 快速設置
-    st.markdown("### ⚡ 快速設置")
+    with col_create:
+        if st.button("➕ 創建自定義供應商", use_container_width=True, type="primary"):
+            st.session_state.show_custom_creator = True
+            rerun_app()
     
-    col_quick1, col_quick2 = st.columns(2)
-    
-    with col_quick1:
-        st.markdown("#### 🚀 快速載入")
-        all_keys = key_manager.get_api_keys()
-        
-        if all_keys:
-            grouped_keys = {}
-            for key in all_keys:
-                provider = key['provider']
-                if provider not in grouped_keys:
-                    grouped_keys[provider] = []
-                grouped_keys[provider].append(key)
-            
-            if grouped_keys:
-                selected_provider = st.selectbox(
-                    "提供商:",
-                    list(grouped_keys.keys()),
-                    format_func=lambda x: f"{API_PROVIDERS.get(x, {}).get('icon', '🔧')} {x}"
-                )
-                
-                provider_keys = grouped_keys[selected_provider]
-                key_options = {
-                    key['id']: f"{'⭐' if key['is_default'] else ''} {key['key_name']}"
-                    for key in provider_keys
-                }
-                
-                selected_key_id = st.selectbox("密鑰:", list(key_options.keys()), format_func=lambda x: key_options[x])
-                
-                if st.button("⚡ 載入", type="primary"):
-                    selected_key = next(k for k in all_keys if k['id'] == selected_key_id)
-                    st.session_state.api_config = {
-                        'provider': selected_key['provider'],
-                        'api_key': selected_key['api_key'],
-                        'base_url': selected_key['base_url'],
-                        'validated': selected_key['validated'],
-                        'key_name': selected_key['key_name']
-                    }
-                    st.success(f"✅ 已載入: {selected_key['key_name']}")
-                    rerun_app()
-        else:
-            st.info("尚未保存密鑰")
-    
-    with col_quick2:
-        st.markdown("#### 🎯 當前狀態")
-        if st.session_state.api_config.get('api_key'):
-            config = st.session_state.api_config
-            st.success("🟢 API 已配置")
-            st.info(f"**提供商**: {config['provider']}")
-            if config.get('key_name'):
-                st.info(f"**密鑰**: {config['key_name']}")
-        else:
-            st.error("🔴 API 未配置")
+    with col_manage:
+        if st.button("🔧 管理自定義供應商", use_container_width=True):
+            st.session_state.show_custom_manager = True
+            rerun_app()
 
 def init_session_state():
     """初始化會話狀態"""
     if 'api_config' not in st.session_state:
         st.session_state.api_config = {
-            'provider': 'Navy',
+            'provider': '',
             'api_key': '',
-            'base_url': 'https://api.navy/v1',
+            'base_url': '',
             'validated': False
         }
     
@@ -751,22 +901,6 @@ def init_session_state():
     if 'favorite_images' not in st.session_state:
         st.session_state.favorite_images = []
 
-def add_to_history(prompt: str, model: str, images: List[str], metadata: Dict):
-    """添加到歷史記錄"""
-    history_item = {
-        "timestamp": datetime.datetime.now(),
-        "prompt": prompt,
-        "model": model,
-        "images": images,
-        "metadata": metadata,
-        "id": str(uuid.uuid4())
-    }
-    st.session_state.generation_history.insert(0, history_item)
-    
-    # 限制記錄數量
-    if len(st.session_state.generation_history) > 50:
-        st.session_state.generation_history = st.session_state.generation_history[:50]
-
 # 初始化
 init_session_state()
 
@@ -775,273 +909,72 @@ api_configured = st.session_state.api_config.get('api_key') is not None and st.s
 
 # 側邊欄
 with st.sidebar:
-    show_api_settings()
+    st.markdown("### 🏢 供應商狀態")
+    
+    if 'selected_provider' in st.session_state:
+        provider = st.session_state.selected_provider
+        all_providers = custom_provider_manager.get_all_providers()
+        provider_info = all_providers.get(provider, {})
+        
+        if provider_info.get('is_custom'):
+            st.success(f"{provider_info['icon']} {provider_info['display_name']} (自定義)")
+        else:
+            st.success(f"{provider_info['icon']} {provider_info['name']}")
+        
+        if api_configured:
+            st.success("🟢 API 已配置")
+        else:
+            st.error("🔴 API 未配置")
+    else:
+        st.info("未選擇供應商")
+    
     st.markdown("---")
     
     # 統計信息
     st.markdown("### 📊 統計")
-    all_keys = key_manager.get_api_keys()
-    discovered_models = key_manager.get_discovered_models()
+    total_keys = len(custom_provider_manager.get_api_keys())
+    custom_providers_count = len(custom_provider_manager.get_custom_providers())
     
     col_stat1, col_stat2 = st.columns(2)
     with col_stat1:
-        st.metric("密鑰數", len(all_keys))
-        st.metric("歷史", len(st.session_state.generation_history))
+        st.metric("API 密鑰", total_keys)
     with col_stat2:
-        st.metric("模型數", len(discovered_models) + len(BASE_MODELS))
-        st.metric("收藏", len(st.session_state.favorite_images))
+        st.metric("自定義供應商", custom_providers_count)
 
 # 主標題
-st.title("🎨 Flux AI & SD Generator Pro - 完整版")
+st.title("🎨 Flux & SD Generator Pro - 自設供應商版")
 
 # 主要內容
-tab1, tab2, tab3 = st.tabs(["🚀 圖像生成", "📚 歷史記錄", "⭐ 收藏夾"])
+if 'show_custom_creator' in st.session_state and st.session_state.show_custom_creator:
+    show_custom_provider_creator()
+    if st.button("⬅️ 返回", key="back_from_creator"):
+        del st.session_state.show_custom_creator
+        rerun_app()
 
-with tab1:
-    if not api_configured:
-        st.warning("⚠️ 請先配置 API 密鑰")
-        st.info("💡 在側邊欄中配置您的 API 密鑰以開始生成圖像")
+elif 'show_custom_manager' in st.session_state and st.session_state.show_custom_manager:
+    if 'editing_provider' in st.session_state:
+        show_provider_editor()
     else:
-        st.success("✅ API 已配置，開始生成圖像吧！")
-        
-        col_gen1, col_gen2 = st.columns([2, 1])
-        
-        with col_gen1:
-            # 模型選擇
-            all_models = get_all_available_models()
-            
-            # 按類別分組顯示
-            flux_models = {k: v for k, v in all_models.items() if v.get('category') == 'flux'}
-            sd_models = {k: v for k, v in all_models.items() if v.get('category') == 'stable-diffusion'}
-            
-            model_category = st.selectbox(
-                "選擇模型類別:",
-                ["⚡ Flux 模型", "🎨 Stable Diffusion"],
-                index=0
-            )
-            
-            if model_category == "⚡ Flux 模型":
-                available_models = flux_models
-            else:
-                available_models = sd_models
-            
-            if not available_models:
-                st.warning("此類別暫無可用模型，請嘗試模型發現功能")
-                selected_model = None
-            else:
-                model_options = list(available_models.keys())
-                selected_model = st.selectbox(
-                    "選擇具體模型:",
-                    model_options,
-                    format_func=lambda x: f"{available_models[x]['icon']} {available_models[x]['name']}"
-                )
-            
-            # 提示詞輸入
-            st.markdown("### ✏️ 提示詞")
-            
-            # 檢查是否有重新生成請求
-            default_prompt = ""
-            if hasattr(st.session_state, 'regenerate_prompt'):
-                default_prompt = st.session_state.regenerate_prompt
-                delattr(st.session_state, 'regenerate_prompt')
-            
-            prompt = st.text_area(
-                "描述您想要生成的圖像:",
-                value=default_prompt,
-                height=100,
-                placeholder="例如：A majestic dragon flying over ancient mountains during sunset, highly detailed, fantasy art style"
-            )
-            
-            # 快速提示詞模板
-            st.markdown("#### 💡 快速模板")
-            template_categories = {
-                "人物": ["Professional portrait in natural lighting", "Young artist in creative studio", "Elderly person with wise expression"],
-                "風景": ["Sunset over snow-capped mountains", "Tropical beach with crystal clear water", "Autumn forest with golden leaves"],
-                "藝術": ["Abstract geometric composition", "Watercolor painting style", "Digital art with vibrant colors"],
-                "科幻": ["Futuristic cityscape with flying vehicles", "Space station orbiting planet", "Cyberpunk street scene with neon"]
-            }
-            
-            template_cols = st.columns(len(template_categories))
-            for i, (category, templates) in enumerate(template_categories.items()):
-                with template_cols[i]:
-                    st.markdown(f"**{category}**")
-                    for j, template in enumerate(templates):
-                        if st.button(template[:20] + "...", key=f"template_{i}_{j}", help=template):
-                            st.session_state.quick_prompt = template
-                            rerun_app()
-            
-            # 應用快速提示詞
-            if hasattr(st.session_state, 'quick_prompt'):
-                prompt = st.session_state.quick_prompt
-                delattr(st.session_state, 'quick_prompt')
-                rerun_app()
-            
-            # 生成設置
-            st.markdown("### ⚙️ 生成設置")
-            col_size, col_num = st.columns(2)
-            
-            with col_size:
-                size_options = ["512x512", "768x768", "1024x1024", "1152x896", "896x1152"]
-                selected_size = st.selectbox("圖像尺寸:", size_options, index=2)
-            
-            with col_num:
-                num_images = st.slider("生成數量:", 1, 4, 1)
-            
-            # 生成按鈕
-            can_generate = selected_model and prompt.strip() and api_configured
-            
-            if st.button("🚀 生成圖像", type="primary", disabled=not can_generate, use_container_width=True):
-                if can_generate:
-                    config = st.session_state.api_config
-                    
-                    # 初始化客戶端
-                    if config['provider'] == "Hugging Face":
-                        client = None
-                    else:
-                        try:
-                            client = OpenAI(
-                                api_key=config['api_key'],
-                                base_url=config['base_url']
-                            )
-                        except Exception as e:
-                            st.error(f"API 客戶端初始化失敗: {str(e)}")
-                            client = None
-                    
-                    if config['provider'] == "Hugging Face" or client:
-                        with st.spinner(f"🎨 正在使用 {available_models[selected_model]['name']} 生成圖像..."):
-                            generation_params = {
-                                "model": selected_model,
-                                "prompt": prompt,
-                                "n": num_images,
-                                "size": selected_size
-                            }
-                            
-                            success, result = generate_images_with_retry(
-                                client, config['provider'], config['api_key'],
-                                config['base_url'], **generation_params
-                            )
-                            
-                            if success:
-                                response = result
-                                image_urls = [img.url for img in response.data]
-                                
-                                metadata = {
-                                    "model_name": available_models[selected_model]['name'],
-                                    "size": selected_size,
-                                    "num_images": num_images,
-                                    "category": available_models[selected_model]['category'],
-                                    "provider": config['provider']
-                                }
-                                
-                                add_to_history(prompt, selected_model, image_urls, metadata)
-                                st.success(f"✨ 成功生成 {len(response.data)} 張圖像！")
-                                
-                                # 顯示生成的圖像
-                                if len(response.data) == 1:
-                                    st.markdown("#### 🎨 生成結果")
-                                    image_id = f"{st.session_state.generation_history[0]['id']}_0"
-                                    display_image_with_actions(
-                                        response.data[0].url, image_id, 
-                                        st.session_state.generation_history[0]
-                                    )
-                                else:
-                                    st.markdown("#### 🎨 生成結果")
-                                    img_cols = st.columns(min(len(response.data), 2))
-                                    for i, image_data in enumerate(response.data):
-                                        with img_cols[i % len(img_cols)]:
-                                            st.markdown(f"**圖像 {i+1}**")
-                                            image_id = f"{st.session_state.generation_history[0]['id']}_{i}"
-                                            display_image_with_actions(
-                                                image_data.url, image_id,
-                                                st.session_state.generation_history[0]
-                                            )
-                            else:
-                                st.error(f"❌ 生成失敗: {result}")
-                    else:
-                        st.error("❌ API 客戶端初始化失敗")
-                else:
-                    if not selected_model:
-                        st.warning("⚠️ 請選擇模型")
-                    elif not prompt.strip():
-                        st.warning("⚠️ 請輸入提示詞")
-        
-        with col_gen2:
-            st.markdown("### ℹ️ 信息面板")
-            
-            if selected_model and available_models:
-                model_info = available_models[selected_model]
-                st.info(f"**當前模型**: {model_info['name']}")
-                st.info(f"**類別**: {model_info['category']}")
-                st.info(f"**描述**: {model_info['description']}")
-            
-            st.markdown("### 📊 使用統計")
-            st.metric("已生成", len(st.session_state.generation_history))
-            st.metric("已收藏", len(st.session_state.favorite_images))
-            
-            st.markdown("### 🎯 模型發現")
-            discovered_count = len(key_manager.get_discovered_models())
-            st.metric("發現模型", discovered_count)
-            
-            if st.button("🔍 發現新模型", use_container_width=True):
-                if api_configured:
-                    # 觸發模型發現
-                    st.info("請在側邊欄的密鑰管理中使用模型發現功能")
-                else:
-                    st.warning("請先配置 API")
-
-with tab2:
-    st.subheader("📚 生成歷史")
+        show_custom_provider_manager()
     
-    if st.session_state.generation_history:
-        search_term = st.text_input("🔍 搜索歷史:", placeholder="輸入關鍵詞搜索...")
-        
-        filtered_history = st.session_state.generation_history
-        if search_term:
-            filtered_history = [
-                item for item in st.session_state.generation_history
-                if search_term.lower() in item['prompt'].lower()
-            ]
-        
-        st.info(f"顯示 {len(filtered_history)} / {len(st.session_state.generation_history)} 條記錄")
-        
-        for item in filtered_history:
-            with st.container():
-                st.markdown(f"### 🎨 {item['prompt'][:50]}...")
-                st.caption(f"時間: {item['timestamp'].strftime('%Y-%m-%d %H:%M')} | 模型: {item.get('metadata', {}).get('model_name', item['model'])}")
-                
-                if item['images']:
-                    img_cols = st.columns(min(len(item['images']), 3))
-                    for i, img_url in enumerate(item['images']):
-                        with img_cols[i % len(img_cols)]:
-                            display_image_with_actions(img_url, f"history_{item['id']}_{i}", item)
-                
-                st.markdown("---")
-    else:
-        st.info("📭 尚無生成歷史")
+    if st.button("⬅️ 返回", key="back_from_manager"):
+        del st.session_state.show_custom_manager
+        if 'editing_provider' in st.session_state:
+            del st.session_state.editing_provider
+        rerun_app()
 
-with tab3:
-    st.subheader("⭐ 我的收藏")
-    
-    if st.session_state.favorite_images:
-        st.info(f"共收藏 {len(st.session_state.favorite_images)} 張圖像")
-        
-        fav_cols = st.columns(3)
-        for i, fav in enumerate(st.session_state.favorite_images):
-            with fav_cols[i % 3]:
-                display_image_with_actions(fav['image_url'], fav['id'], fav.get('history_item'))
-                st.caption(f"收藏於: {fav['timestamp'].strftime('%m-%d %H:%M')}")
-    else:
-        st.info("⭐ 尚無收藏圖像")
+else:
+    show_provider_selector()
 
 # 頁腳
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666;">
-    🚀 <strong>Koyeb 部署</strong> | 
-    🔍 <strong>自動模型發現</strong> | 
-    💾 <strong>密鑰管理</strong> | 
-    ⚡ <strong>圖像生成</strong>
+    🛠️ <strong>自定義供應商支持</strong> | 
+    🔧 <strong>靈活配置</strong> | 
+    📊 <strong>統一管理</strong> | 
+    🧪 <strong>配置測試</strong>
     <br><br>
-    <small>支援 Flux AI & Stable Diffusion，自動發現模型，完整歷史管理</small>
+    <small>支援創建和管理自定義 API 供應商，適配任何 AI 圖像生成服務</small>
 </div>
 """, unsafe_allow_html=True)
