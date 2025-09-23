@@ -401,8 +401,10 @@ def generate_pollinations_image(prompt: str, model: str = "flux", **params) -> T
             url_params.append("width=1024")
             url_params.append("height=1024")
         
-        if params.get("seed", -1) >= 0:
-            url_params.append(f"seed={params['seed']}")
+        # 修復：檢查 seed 是否為 None 或有效值
+        seed_value = params.get("seed")
+        if seed_value is not None and seed_value >= 0:
+            url_params.append(f"seed={seed_value}")
         
         if params.get("nologo", True):
             url_params.append("nologo=true")
@@ -501,6 +503,11 @@ def generate_images_with_retry(client, provider: str, api_key: str, base_url: st
     """帶重試機制的圖像生成"""
     max_retries = 3
     
+    # 修復：確保 seed 參數的安全處理
+    seed_value = params.get("seed")
+    if seed_value is None:
+        params["seed"] = -1  # 設置默認值
+    
     for attempt in range(max_retries):
         try:
             all_providers = provider_manager.get_all_providers()
@@ -516,9 +523,21 @@ def generate_images_with_retry(client, provider: str, api_key: str, base_url: st
             elif api_type == "krea":
                 return generate_krea_image(api_key, base_url, **params)
             else:
-                # OpenAI 兼容
+                # OpenAI 兼容 - 修復參數傳遞
                 if client:
-                    response = client.images.generate(**params)
+                    # 為 OpenAI API 準備乾淨的參數
+                    clean_params = {
+                        "model": params.get("model"),
+                        "prompt": params.get("prompt"),
+                        "n": params.get("n", 1),
+                        "size": params.get("size", "1024x1024")
+                    }
+                    
+                    # 只在有效時添加可選參數
+                    if params.get("quality"):
+                        clean_params["quality"] = params["quality"]
+                        
+                    response = client.images.generate(**clean_params)
                     return True, response
                 else:
                     return False, "客戶端未初始化"
@@ -899,7 +918,9 @@ def display_image_with_actions(image_url: str, image_id: str, generation_info: D
             if generation_info and st.button("🎨 變化生成", key=f"variation_{image_id}", use_container_width=True):
                 variation_info = generation_info.copy()
                 variation_info['prompt'] = f"{generation_info.get('prompt', '')} (variation)"
-                if 'seed' in variation_info and variation_info['seed'] >= 0:
+                # 修復：安全處理 seed 參數
+                seed_value = variation_info.get('seed')
+                if seed_value is not None and seed_value >= 0:
                     variation_info['seed'] = random.randint(0, 2147483647)
                 st.session_state.variation_info = variation_info
                 rerun_app()
@@ -1041,11 +1062,15 @@ def show_image_generation(provider: str, provider_info: Dict):
                 naturalism_boost = False
                 color_harmony = "auto"
             
+            # 修復：種子參數的安全處理
             seed = st.number_input("隨機種子 (可選):", min_value=-1, max_value=2147483647, value=-1)
             
             if seed == -1 and st.button("🎲 生成隨機種子"):
-                seed = random.randint(0, 2147483647)
-                st.success(f"隨機種子: {seed}")
+                new_seed = random.randint(0, 2147483647)
+                st.success(f"隨機種子: {new_seed}")
+                # 更新 session state 中的 seed 值
+                st.session_state.temp_seed = new_seed
+                seed = new_seed
     
     st.markdown("---")
     
@@ -1061,16 +1086,19 @@ def show_image_generation(provider: str, provider_info: Dict):
             use_container_width=True
         ):
             if can_generate:
+                # 修復：確保 seed 參數正確傳遞
+                final_seed = seed if seed >= 0 else (st.session_state.get('temp_seed', -1) if hasattr(st.session_state, 'temp_seed') else -1)
+                
                 generate_image_main(
                     provider, provider_info, selected_model_info,
                     prompt, selected_size, num_images,
-                    guidance_scale, steps, seed, selected_category,
+                    guidance_scale, steps, final_seed, selected_category,
                     aesthetic_weight, naturalism_boost, color_harmony
                 )
     
     with col_clear:
         if st.button("🗑️ 清除", use_container_width=True):
-            for key in ['quick_prompt', 'regenerate_info', 'variation_info']:
+            for key in ['quick_prompt', 'regenerate_info', 'variation_info', 'temp_seed']:
                 if key in st.session_state:
                     del st.session_state[key]
             rerun_app()
@@ -1097,7 +1125,7 @@ def generate_image_main(provider: str, provider_info: Dict, model_info: Dict,
             st.error(f"API 客戶端初始化失敗: {str(e)}")
             return
     
-    # 構建生成參數
+    # 構建生成參數 - 修復種子參數處理
     generation_params = {
         "model": model_info['model_id'],
         "prompt": prompt,
@@ -1106,7 +1134,7 @@ def generate_image_main(provider: str, provider_info: Dict, model_info: Dict,
         "category": category,
         "guidance_scale": guidance_scale,
         "steps": steps,
-        "seed": seed if seed >= 0 else None,
+        "seed": seed if seed is not None and seed >= 0 else None,  # 修復這裡
         "aesthetic_weight": aesthetic_weight,
         "naturalism_boost": naturalism_boost,
         "color_harmony": color_harmony
@@ -1409,72 +1437,3 @@ if 'selected_provider' not in st.session_state:
         **🎨 適用場景**
         
         • 商業攝影和廣告
-        • 藝術創作和概念設計
-        • 電商產品圖像
-        • 社交媒體內容
-        """)
-        
-        st.info("""
-        **⚡ 支援平台**
-        
-        • Krea.ai - 官方平台
-        • Pollinations.ai - 完全免費
-        • Hugging Face - 開源社區
-        • Together AI - 高性能 API
-        """)
-
-# 主要內容
-if 'selected_provider' not in st.session_state:
-    show_provider_selector()
-else:
-    # 顯示供應商管理界面
-    selected_provider = st.session_state.selected_provider
-    all_providers = provider_manager.get_all_providers()
-    provider_info = all_providers[selected_provider]
-    
-    st.subheader(f"{provider_info['icon']} {provider_info['name']}")
-    
-    # 特別標注 FLUX Krea 支援
-    if "flux-krea" in provider_info.get('features', []):
-        st.success("🎭 此供應商支援 FLUX Krea 美學優化模型！")
-    
-    col_info, col_switch = st.columns([3, 1])
-    
-    with col_info:
-        st.info(f"📋 {provider_info['description']}")
-        st.caption(f"🔗 API 類型: {provider_info['api_type']} | 端點: {provider_info['base_url']}")
-        
-        features_badges = " ".join([f"`{feature}`" for feature in provider_info['features']])
-        st.markdown(f"**支持功能**: {features_badges}")
-        
-        if provider_info.get('speciality'):
-            st.success(f"🎯 專長: {provider_info['speciality']}")
-    
-    with col_switch:
-        if st.button("🔄 切換供應商", use_container_width=True):
-            del st.session_state.selected_provider
-            rerun_app()
-    
-    management_tabs = st.tabs(["🔑 密鑰管理", "🤖 模型發現", "🎨 圖像生成"])
-    
-    with management_tabs[0]:
-        show_provider_key_management(selected_provider, provider_info)
-    
-    with management_tabs[1]:
-        show_provider_model_discovery(selected_provider, provider_info)
-    
-    with management_tabs[2]:
-        show_image_generation(selected_provider, provider_info)
-
-# 頁腳
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666;">
-    🎭 <strong>FLUX Krea 美學優化</strong> | 
-    🌸 <strong>免費服務</strong> | 
-    ⚡ <strong>快速切換</strong> | 
-    📊 <strong>智能管理</strong>
-    <br><br>
-    <small>現已全面支援 FLUX Krea 美學優化模型，打造真正專業級的 AI 圖像生成體驗！</small>
-</div>
-""", unsafe_allow_html=True)
