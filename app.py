@@ -127,7 +127,7 @@ MODEL_PROVIDERS = {
     }
 }
 
-# 模型識別規則和供應商特定模型庫（與之前相同）
+# 模型識別規則和供應商特定模型庫
 PROVIDER_MODEL_PATTERNS = {
     "flux": {
         "patterns": [
@@ -258,7 +258,7 @@ class QuickSwitchProviderManager:
             )
         ''')
         
-        # 快速切換配置表 - 新增
+        # 快速切換配置表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS quick_switch_configs (
                 id TEXT PRIMARY KEY,
@@ -291,47 +291,15 @@ class QuickSwitchProviderManager:
         conn.commit()
         conn.close()
     
-    def save_custom_provider(self, **kwargs) -> str:
-        """保存自定義供應商"""
-        provider_id = str(uuid.uuid4())
+    def get_all_providers(self) -> Dict[str, Dict]:
+        """獲取所有供應商（預設+自定義）"""
+        all_providers = MODEL_PROVIDERS.copy()
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        custom_providers = self.get_custom_providers()
+        for provider in custom_providers:
+            all_providers[provider['provider_name']] = provider
         
-        try:
-            cursor.execute('''
-                INSERT INTO custom_providers 
-                (id, provider_name, display_name, icon, description, api_type, base_url, 
-                 key_prefix, features, pricing, speed, quality, headers, auth_type, 
-                 timeout, max_retries, rate_limit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                provider_id,
-                kwargs.get('provider_name', ''),
-                kwargs.get('display_name', ''),
-                kwargs.get('icon', '🔧'),
-                kwargs.get('description', ''),
-                kwargs.get('api_type', 'openai_compatible'),
-                kwargs.get('base_url', ''),
-                kwargs.get('key_prefix', ''),
-                json.dumps(kwargs.get('features', [])),
-                kwargs.get('pricing', '自定義定價'),
-                kwargs.get('speed', '未知'),
-                kwargs.get('quality', '未知'),
-                json.dumps(kwargs.get('headers', {})),
-                kwargs.get('auth_type', 'bearer'),
-                kwargs.get('timeout', 30),
-                kwargs.get('max_retries', 3),
-                kwargs.get('rate_limit', 60)
-            ))
-            
-            conn.commit()
-            conn.close()
-            return provider_id
-            
-        except sqlite3.IntegrityError:
-            conn.close()
-            return None
+        return all_providers
     
     def get_custom_providers(self) -> List[Dict]:
         """獲取自定義供應商列表"""
@@ -373,16 +341,6 @@ class QuickSwitchProviderManager:
         
         conn.close()
         return providers
-    
-    def get_all_providers(self) -> Dict[str, Dict]:
-        """獲取所有供應商（預設+自定義）"""
-        all_providers = MODEL_PROVIDERS.copy()
-        
-        custom_providers = self.get_custom_providers()
-        for provider in custom_providers:
-            all_providers[provider['provider_name']] = provider
-        
-        return all_providers
     
     def save_api_key(self, provider: str, key_name: str, api_key: str, base_url: str = "", 
                      notes: str = "", is_default: bool = False) -> str:
@@ -433,88 +391,6 @@ class QuickSwitchProviderManager:
         conn.close()
         return keys
     
-    def save_quick_switch_config(self, config_name: str, provider: str, api_key_id: str,
-                                default_model_id: str = "", notes: str = "", is_favorite: bool = False) -> str:
-        """保存快速切換配置"""
-        config_id = str(uuid.uuid4())
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                INSERT INTO quick_switch_configs 
-                (id, config_name, provider, api_key_id, default_model_id, is_favorite, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (config_id, config_name, provider, api_key_id, default_model_id, is_favorite, notes))
-            
-            conn.commit()
-            conn.close()
-            return config_id
-            
-        except sqlite3.IntegrityError:
-            conn.close()
-            return None
-    
-    def get_quick_switch_configs(self) -> List[Dict]:
-        """獲取快速切換配置"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT qsc.id, qsc.config_name, qsc.provider, qsc.api_key_id, 
-                   qsc.default_model_id, qsc.is_favorite, qsc.last_used, 
-                   qsc.usage_count, qsc.created_at, qsc.notes,
-                   ak.key_name, ak.api_key, ak.base_url, ak.validated
-            FROM quick_switch_configs qsc
-            LEFT JOIN api_keys ak ON qsc.api_key_id = ak.id
-            ORDER BY qsc.is_favorite DESC, qsc.usage_count DESC, qsc.last_used DESC
-        ''')
-        
-        configs = []
-        for row in cursor.fetchall():
-            configs.append({
-                'id': row[0],
-                'config_name': row[1],
-                'provider': row[2],
-                'api_key_id': row[3],
-                'default_model_id': row[4],
-                'is_favorite': bool(row[5]),
-                'last_used': row[6],
-                'usage_count': row[7],
-                'created_at': row[8],
-                'notes': row[9],
-                'key_name': row[10],
-                'api_key': row[11],
-                'base_url': row[12],
-                'validated': bool(row[13]) if row[13] is not None else False
-            })
-        
-        conn.close()
-        return configs
-    
-    def update_config_usage(self, config_id: str):
-        """更新配置使用次數和時間"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE quick_switch_configs 
-            SET usage_count = usage_count + 1, last_used = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (config_id,))
-        
-        conn.commit()
-        conn.close()
-    
-    def delete_quick_switch_config(self, config_id: str):
-        """刪除快速切換配置"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM quick_switch_configs WHERE id = ?", (config_id,))
-        conn.commit()
-        conn.close()
-    
-    # 其他方法保持不變...
     def save_provider_model(self, provider: str, model_name: str, model_id: str, 
                            category: str, **kwargs) -> Optional[str]:
         if category not in ['flux', 'stable-diffusion']:
@@ -586,6 +462,76 @@ class QuickSwitchProviderManager:
         conn.close()
         return models
     
+    def save_quick_switch_config(self, config_name: str, provider: str, api_key_id: str,
+                                default_model_id: str = "", notes: str = "", is_favorite: bool = False) -> str:
+        config_id = str(uuid.uuid4())
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO quick_switch_configs 
+                (id, config_name, provider, api_key_id, default_model_id, is_favorite, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (config_id, config_name, provider, api_key_id, default_model_id, is_favorite, notes))
+            
+            conn.commit()
+            conn.close()
+            return config_id
+            
+        except sqlite3.IntegrityError:
+            conn.close()
+            return None
+    
+    def get_quick_switch_configs(self) -> List[Dict]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT qsc.id, qsc.config_name, qsc.provider, qsc.api_key_id, 
+                   qsc.default_model_id, qsc.is_favorite, qsc.last_used, 
+                   qsc.usage_count, qsc.created_at, qsc.notes,
+                   ak.key_name, ak.api_key, ak.base_url, ak.validated
+            FROM quick_switch_configs qsc
+            LEFT JOIN api_keys ak ON qsc.api_key_id = ak.id
+            ORDER BY qsc.is_favorite DESC, qsc.usage_count DESC, qsc.last_used DESC
+        ''')
+        
+        configs = []
+        for row in cursor.fetchall():
+            configs.append({
+                'id': row[0],
+                'config_name': row[1],
+                'provider': row[2],
+                'api_key_id': row[3],
+                'default_model_id': row[4],
+                'is_favorite': bool(row[5]),
+                'last_used': row[6],
+                'usage_count': row[7],
+                'created_at': row[8],
+                'notes': row[9],
+                'key_name': row[10],
+                'api_key': row[11],
+                'base_url': row[12],
+                'validated': bool(row[13]) if row[13] is not None else False
+            })
+        
+        conn.close()
+        return configs
+    
+    def update_config_usage(self, config_id: str):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE quick_switch_configs 
+            SET usage_count = usage_count + 1, last_used = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (config_id,))
+        
+        conn.commit()
+        conn.close()
+    
     def update_key_validation(self, key_id: str, validated: bool):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -602,241 +548,6 @@ class QuickSwitchProviderManager:
 
 # 全局實例
 provider_manager = QuickSwitchProviderManager()
-
-def show_quick_switch_panel():
-    """顯示快速切換面板"""
-    st.markdown("### ⚡ 快速切換供應商")
-    
-    # 獲取快速切換配置
-    quick_configs = provider_manager.get_quick_switch_configs()
-    all_providers = provider_manager.get_all_providers()
-    
-    if not quick_configs:
-        st.info("📭 尚未創建任何快速切換配置")
-        st.markdown("💡 **提示**: 在密鑰管理中保存密鑰後，可以創建快速切換配置")
-        return
-    
-    # 顯示快速切換按鈕
-    st.markdown("#### 🚀 一鍵切換")
-    
-    # 收藏的配置優先顯示
-    favorite_configs = [c for c in quick_configs if c['is_favorite']]
-    other_configs = [c for c in quick_configs if not c['is_favorite']]
-    
-    if favorite_configs:
-        st.markdown("**⭐ 收藏配置**")
-        cols = st.columns(min(len(favorite_configs), 4))
-        
-        for i, config in enumerate(favorite_configs):
-            with cols[i % len(cols)]:
-                provider_info = all_providers.get(config['provider'], {})
-                icon = provider_info.get('icon', '🔧')
-                
-                # 狀態指示器
-                status_icon = "🟢" if config['validated'] else "🟡"
-                
-                button_text = f"{icon} {config['config_name']}"
-                
-                if st.button(
-                    button_text,
-                    key=f"quick_fav_{config['id']}",
-                    use_container_width=True,
-                    type="primary"
-                ):
-                    switch_to_config(config)
-                    st.success(f"✅ 已切換到: {config['config_name']}")
-                    rerun_app()
-                
-                # 顯示使用次數和狀態
-                st.caption(f"{status_icon} 使用 {config['usage_count']} 次")
-    
-    if other_configs:
-        st.markdown("**📋 所有配置**")
-        cols = st.columns(min(len(other_configs), 3))
-        
-        for i, config in enumerate(other_configs):
-            with cols[i % len(cols)]:
-                provider_info = all_providers.get(config['provider'], {})
-                icon = provider_info.get('icon', '🔧')
-                status_icon = "🟢" if config['validated'] else "🟡"
-                
-                button_text = f"{icon} {config['config_name']}"
-                
-                if st.button(
-                    button_text,
-                    key=f"quick_other_{config['id']}",
-                    use_container_width=True
-                ):
-                    switch_to_config(config)
-                    st.success(f"✅ 已切換到: {config['config_name']}")
-                    rerun_app()
-                
-                st.caption(f"{status_icon} 使用 {config['usage_count']} 次")
-
-def switch_to_config(config: Dict):
-    """切換到指定配置"""
-    all_providers = provider_manager.get_all_providers()
-    provider_info = all_providers.get(config['provider'], {})
-    
-    # 更新會話狀態
-    st.session_state.selected_provider = config['provider']
-    st.session_state.api_config = {
-        'provider': config['provider'],
-        'api_key': config['api_key'],
-        'base_url': config['base_url'] or provider_info.get('base_url', ''),
-        'validated': config['validated'],
-        'key_name': config['key_name'],
-        'key_id': config['api_key_id']
-    }
-    
-    # 如果有默認模型，也一併設置
-    if config['default_model_id']:
-        st.session_state.selected_model = config['default_model_id']
-    
-    # 更新使用統計
-    provider_manager.update_config_usage(config['id'])
-
-def show_quick_switch_manager():
-    """顯示快速切換配置管理"""
-    st.markdown("### 🔧 快速切換配置管理")
-    
-    # 創建新配置
-    with st.expander("➕ 創建新的快速切換配置"):
-        with st.form("new_quick_config"):
-            st.markdown("#### 📋 配置信息")
-            
-            config_name = st.text_input("配置名稱 *", placeholder="例如：工作用 Navy API")
-            
-            # 選擇供應商
-            all_providers = provider_manager.get_all_providers()
-            provider_options = list(all_providers.keys())
-            selected_provider = st.selectbox(
-                "選擇供應商 *",
-                provider_options,
-                format_func=lambda x: f"{all_providers[x]['icon']} {all_providers[x]['name'] if not all_providers[x].get('is_custom') else all_providers[x]['display_name']}"
-            )
-            
-            # 選擇密鑰
-            if selected_provider:
-                provider_keys = provider_manager.get_api_keys(selected_provider)
-                if provider_keys:
-                    key_options = {key['id']: f"{key['key_name']} ({'✅' if key['validated'] else '⚠️'})" for key in provider_keys}
-                    selected_key_id = st.selectbox("選擇密鑰 *", list(key_options.keys()), format_func=lambda x: key_options[x])
-                else:
-                    st.warning(f"⚠️ {selected_provider} 沒有保存的密鑰")
-                    selected_key_id = None
-            else:
-                selected_key_id = None
-            
-            # 選擇默認模型
-            if selected_provider:
-                provider_models = provider_manager.get_provider_models(selected_provider)
-                if provider_models:
-                    model_options = [""] + [model['model_id'] for model in provider_models]
-                    default_model = st.selectbox(
-                        "默認模型（可選）",
-                        model_options,
-                        format_func=lambda x: "未選擇" if x == "" else next((m['model_name'] for m in provider_models if m['model_id'] == x), x)
-                    )
-                else:
-                    default_model = ""
-            else:
-                default_model = ""
-            
-            notes = st.text_area("備註", placeholder="描述此配置的用途...")
-            is_favorite = st.checkbox("設為收藏配置", help="收藏的配置會優先顯示")
-            
-            if st.form_submit_button("💾 創建配置", type="primary", use_container_width=True):
-                if config_name and selected_provider and selected_key_id:
-                    config_id = provider_manager.save_quick_switch_config(
-                        config_name=config_name,
-                        provider=selected_provider,
-                        api_key_id=selected_key_id,
-                        default_model_id=default_model,
-                        notes=notes,
-                        is_favorite=is_favorite
-                    )
-                    
-                    if config_id:
-                        st.success(f"✅ 快速切換配置 '{config_name}' 已創建！")
-                        time.sleep(1)
-                        rerun_app()
-                    else:
-                        st.error("❌ 創建失敗：配置名稱已存在")
-                else:
-                    st.error("❌ 請填寫所有必填字段")
-    
-    # 現有配置管理
-    st.markdown("#### 📋 現有配置")
-    
-    quick_configs = provider_manager.get_quick_switch_configs()
-    
-    if quick_configs:
-        for config in quick_configs:
-            with st.container():
-                col_info, col_actions = st.columns([3, 1])
-                
-                with col_info:
-                    all_providers = provider_manager.get_all_providers()
-                    provider_info = all_providers.get(config['provider'], {})
-                    
-                    # 配置標題
-                    title_icons = []
-                    if config['is_favorite']:
-                        title_icons.append("⭐")
-                    if config['validated']:
-                        title_icons.append("🟢")
-                    else:
-                        title_icons.append("🟡")
-                    
-                    icon_text = " ".join(title_icons)
-                    st.markdown(f"**{icon_text} {config['config_name']}**")
-                    
-                    # 詳細信息
-                    provider_name = provider_info.get('name', provider_info.get('display_name', config['provider']))
-                    st.caption(f"**供應商**: {provider_info.get('icon', '🔧')} {provider_name}")
-                    st.caption(f"**密鑰**: {config['key_name']} | **使用次數**: {config['usage_count']}")
-                    
-                    if config['default_model_id']:
-                        st.caption(f"**默認模型**: {config['default_model_id']}")
-                    
-                    if config['notes']:
-                        st.caption(f"**備註**: {config['notes']}")
-                    
-                    if config['last_used']:
-                        st.caption(f"**最後使用**: {config['last_used']}")
-                
-                with col_actions:
-                    # 快速切換按鈕
-                    if st.button("🚀 切換", key=f"switch_{config['id']}", use_container_width=True):
-                        switch_to_config(config)
-                        st.success(f"✅ 已切換到: {config['config_name']}")
-                        rerun_app()
-                    
-                    # 測試按鈕
-                    if st.button("🧪 測試", key=f"test_{config['id']}", use_container_width=True):
-                        with st.spinner("測試連接..."):
-                            is_valid, message = validate_api_key(config['api_key'], config['base_url'], config['provider'])
-                            if is_valid:
-                                st.success(f"✅ {message}")
-                                provider_manager.update_key_validation(config['api_key_id'], True)
-                            else:
-                                st.error(f"❌ {message}")
-                                provider_manager.update_key_validation(config['api_key_id'], False)
-                    
-                    # 刪除按鈕
-                    if st.button("🗑️ 刪除", key=f"delete_{config['id']}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_{config['id']}", False):
-                            provider_manager.delete_quick_switch_config(config['id'])
-                            st.success("配置已刪除")
-                            rerun_app()
-                        else:
-                            st.session_state[f"confirm_delete_{config['id']}"] = True
-                            st.warning("再次點擊確認刪除")
-                
-                st.markdown("---")
-    else:
-        st.info("📭 尚未創建任何快速切換配置")
 
 def validate_api_key(api_key: str, base_url: str, provider: str) -> Tuple[bool, str]:
     """驗證 API 密鑰是否有效"""
@@ -872,6 +583,63 @@ def validate_api_key(api_key: str, base_url: str, provider: str) -> Tuple[bool, 
         else:
             return False, f"{provider} 驗證失敗: {error_msg[:50]}"
 
+def show_quick_switch_panel():
+    """顯示快速切換面板"""
+    st.markdown("### ⚡ 快速切換供應商")
+    
+    quick_configs = provider_manager.get_quick_switch_configs()
+    all_providers = provider_manager.get_all_providers()
+    
+    if not quick_configs:
+        st.info("📭 尚未創建任何快速切換配置")
+        return
+    
+    # 顯示快速切換按鈕
+    favorite_configs = [c for c in quick_configs if c['is_favorite']]
+    other_configs = [c for c in quick_configs if not c['is_favorite']]
+    
+    if favorite_configs:
+        st.markdown("**⭐ 收藏配置**")
+        cols = st.columns(min(len(favorite_configs), 4))
+        
+        for i, config in enumerate(favorite_configs):
+            with cols[i % len(cols)]:
+                provider_info = all_providers.get(config['provider'], {})
+                icon = provider_info.get('icon', '🔧')
+                status_icon = "🟢" if config['validated'] else "🟡"
+                
+                if st.button(
+                    f"{icon} {config['config_name']}",
+                    key=f"quick_fav_{config['id']}",
+                    use_container_width=True,
+                    type="primary"
+                ):
+                    switch_to_config(config)
+                    st.success(f"✅ 已切換到: {config['config_name']}")
+                    rerun_app()
+                
+                st.caption(f"{status_icon} 使用 {config['usage_count']} 次")
+
+def switch_to_config(config: Dict):
+    """切換到指定配置"""
+    all_providers = provider_manager.get_all_providers()
+    provider_info = all_providers.get(config['provider'], {})
+    
+    st.session_state.selected_provider = config['provider']
+    st.session_state.api_config = {
+        'provider': config['provider'],
+        'api_key': config['api_key'],
+        'base_url': config['base_url'] or provider_info.get('base_url', ''),
+        'validated': config['validated'],
+        'key_name': config['key_name'],
+        'key_id': config['api_key_id']
+    }
+    
+    if config['default_model_id']:
+        st.session_state.selected_model = config['default_model_id']
+    
+    provider_manager.update_config_usage(config['id'])
+
 def show_provider_selector():
     """顯示供應商選擇器"""
     st.subheader("🏢 選擇模型供應商")
@@ -884,23 +652,9 @@ def show_provider_selector():
     # 原有的供應商選擇界面
     all_providers = provider_manager.get_all_providers()
     default_providers = {k: v for k, v in all_providers.items() if not v.get('is_custom', False)}
-    custom_providers = {k: v for k, v in all_providers.items() if v.get('is_custom', False)}
     
-    # 預設供應商
     if default_providers:
         st.markdown("### 🏭 預設供應商")
-        
-        provider_data = []
-        for provider_key, provider_info in default_providers.items():
-            provider_data.append({
-                "供應商": f"{provider_info['icon']} {provider_info['name']}",
-                "特色": ", ".join(provider_info['features']),
-                "定價": provider_info['pricing'],
-                "速度": provider_info['speed'],
-                "品質": provider_info['quality']
-            })
-        
-        st.dataframe(provider_data, use_container_width=True)
         
         cols = st.columns(3)
         for i, (provider_key, provider_info) in enumerate(default_providers.items()):
@@ -908,10 +662,6 @@ def show_provider_selector():
                 with st.container():
                     st.markdown(f"#### {provider_info['icon']} {provider_info['name']}")
                     st.caption(provider_info['description'])
-                    
-                    if 'features' in provider_info:
-                        features_text = " | ".join([f"🏷️ {feature}" for feature in provider_info['features']])
-                        st.markdown(f"**特色**: {features_text}")
                     
                     if st.button(f"選擇 {provider_info['name']}", key=f"select_default_{provider_key}", use_container_width=True):
                         st.session_state.selected_provider = provider_key
@@ -921,35 +671,304 @@ def show_provider_selector():
                     saved_keys = provider_manager.get_api_keys(provider_key)
                     if saved_keys:
                         st.caption(f"🔑 已保存 {len(saved_keys)} 個密鑰")
+
+def show_provider_key_management(provider: str, provider_info: Dict):
+    """顯示供應商密鑰管理"""
+    st.markdown("### 🔑 密鑰管理")
     
-    # 自定義供應商
-    if custom_providers:
-        st.markdown("### 🔧 自定義供應商")
+    saved_keys = provider_manager.get_api_keys(provider)
+    
+    if saved_keys:
+        st.markdown("#### 📋 已保存的密鑰")
         
-        cols = st.columns(3)
-        for i, (provider_key, provider_info) in enumerate(custom_providers.items()):
-            with cols[i % 3]:
-                with st.container():
-                    st.markdown(f"#### {provider_info['icon']} {provider_info['display_name']}")
-                    st.caption(provider_info['description'] or "自定義 API 供應商")
-                    
-                    st.caption(f"**類型**: {provider_info['api_type']} | **端點**: {provider_info['base_url'][:30]}...")
-                    
-                    if provider_info['features']:
-                        features_text = " | ".join([f"🏷️ {feature}" for feature in provider_info['features']])
-                        st.markdown(f"**功能**: {features_text}")
-                    
-                    if st.button(f"選擇 {provider_info['display_name']}", key=f"select_custom_{provider_key}", use_container_width=True):
-                        st.session_state.selected_provider = provider_key
-                        st.success(f"已選擇 {provider_info['display_name']}")
+        for key_info in saved_keys:
+            with st.container():
+                col_key, col_actions = st.columns([3, 1])
+                
+                with col_key:
+                    status_icon = "🟢" if key_info['validated'] else "🟡"
+                    default_icon = "⭐" if key_info['is_default'] else ""
+                    st.markdown(f"{status_icon} {default_icon} **{key_info['key_name']}**")
+                    st.caption(f"創建於: {key_info['created_at']} | {key_info['notes'] or '無備註'}")
+                
+                with col_actions:
+                    if st.button("✅ 使用", key=f"use_key_{key_info['id']}"):
+                        st.session_state.api_config = {
+                            'provider': provider,
+                            'api_key': key_info['api_key'],
+                            'base_url': key_info['base_url'] or provider_info['base_url'],
+                            'validated': key_info['validated'],
+                            'key_name': key_info['key_name']
+                        }
+                        st.success(f"已載入密鑰: {key_info['key_name']}")
                         rerun_app()
+                
+                st.markdown("---")
+    
+    # 新增密鑰
+    st.markdown("#### ➕ 新增密鑰")
+    
+    col_name, col_key = st.columns(2)
+    
+    with col_name:
+        key_name = st.text_input("密鑰名稱:", placeholder=f"例如：{provider} 主密鑰")
+    
+    with col_key:
+        if provider_info.get('is_custom'):
+            placeholder = f"輸入 {provider_info['display_name']} API 密鑰..."
+        else:
+            placeholder = f"輸入 {provider_info['name']} API 密鑰..."
+        
+        api_key = st.text_input(
+            "API 密鑰:",
+            type="password",
+            placeholder=placeholder
+        )
+    
+    with st.expander("🔧 高級設置"):
+        custom_base_url = st.text_input(
+            "自定義端點 URL:",
+            value=provider_info['base_url'],
+            help="留空使用默認端點"
+        )
+        
+        notes = st.text_area("備註:", placeholder="記錄此密鑰的用途...")
+        is_default = st.checkbox("設為默認密鑰")
+    
+    col_save, col_test = st.columns(2)
+    
+    with col_save:
+        if st.button("💾 保存密鑰", type="primary", use_container_width=True):
+            if key_name and api_key:
+                key_id = provider_manager.save_api_key(
+                    provider, key_name, api_key, 
+                    custom_base_url, notes, is_default
+                )
+                st.success(f"✅ 密鑰已保存！ID: {key_id[:8]}...")
+                rerun_app()
+            else:
+                st.error("❌ 請填寫完整信息")
+    
+    with col_test:
+        if st.button("🧪 測試並保存", use_container_width=True):
+            if key_name and api_key:
+                with st.spinner(f"測試 {provider} API..."):
+                    is_valid, message = validate_api_key(
+                        api_key, custom_base_url, provider
+                    )
                     
-                    saved_keys = provider_manager.get_api_keys(provider_key)
-                    if saved_keys:
-                        st.caption(f"🔑 已保存 {len(saved_keys)} 個密鑰")
+                    if is_valid:
+                        key_id = provider_manager.save_api_key(
+                            provider, key_name, api_key,
+                            custom_base_url, notes, is_default
+                        )
+                        provider_manager.update_key_validation(key_id, True)
+                        st.success(f"✅ {message} - 密鑰已保存")
+                        rerun_app()
+                    else:
+                        st.error(f"❌ {message}")
+            else:
+                st.error("❌ 請填寫完整信息")
+
+def show_provider_model_discovery(provider: str, provider_info: Dict):
+    """顯示供應商模型發現"""
+    st.markdown("### 🤖 模型發現")
+    
+    if not st.session_state.api_config.get('api_key'):
+        st.warning("⚠️ 請先配置 API 密鑰")
+        return
+    
+    col_discover, col_results = st.columns([1, 2])
+    
+    with col_discover:
+        st.markdown("#### 🔍 發現設置")
+        
+        supported_categories = []
+        if "flux" in provider_info['features']:
+            supported_categories.append("⚡ Flux 模型")
+        if "stable-diffusion" in provider_info['features']:
+            supported_categories.append("🎨 Stable Diffusion")
+        
+        if not supported_categories:
+            st.warning(f"{provider} 不支持 Flux 或 SD 模型")
+            return
+        
+        selected_categories = st.multiselect(
+            "選擇要發現的模型類型:",
+            supported_categories,
+            default=supported_categories
+        )
+        
+        if st.button("🚀 開始發現", type="primary", use_container_width=True):
+            if selected_categories:
+                discover_provider_models(provider, provider_info, selected_categories)
+            else:
+                st.warning("請選擇要發現的模型類型")
+    
+    with col_results:
+        st.markdown("#### 📊 發現結果")
+        
+        discovered_models = provider_manager.get_provider_models(provider)
+        
+        if discovered_models:
+            flux_models = [m for m in discovered_models if m['category'] == 'flux']
+            sd_models = [m for m in discovered_models if m['category'] == 'stable-diffusion']
+            
+            if flux_models:
+                st.markdown(f"**⚡ Flux 模型**: {len(flux_models)} 個")
+                for model in flux_models[:3]:
+                    st.write(f"• {model['icon']} {model['model_name']}")
+            
+            if sd_models:
+                st.markdown(f"**🎨 SD 模型**: {len(sd_models)} 個")
+                for model in sd_models[:3]:
+                    st.write(f"• {model['icon']} {model['model_name']}")
+            
+            if len(discovered_models) > 6:
+                st.caption(f"... 還有 {len(discovered_models) - 6} 個模型")
+        else:
+            st.info("尚未發現任何模型")
+
+def discover_provider_models(provider: str, provider_info: Dict, selected_categories: List[str]):
+    """發現供應商模型"""
+    api_type = provider_info.get("api_type", "openai_compatible")
+    config = st.session_state.api_config
+    
+    with st.spinner(f"🔍 正在從 {provider} 發現模型..."):
+        discovered_count = {"flux": 0, "stable-diffusion": 0}
+        
+        try:
+            if api_type == "huggingface":
+                if provider in PROVIDER_SPECIFIC_MODELS:
+                    provider_models = PROVIDER_SPECIFIC_MODELS[provider]
+                    
+                    for category, models in provider_models.items():
+                        if (category == "flux" and "⚡ Flux 模型" in selected_categories) or \
+                           (category == "stable-diffusion" and "🎨 Stable Diffusion" in selected_categories):
+                            
+                            for model_path in models:
+                                model_name = model_path.split('/')[-1]
+                                
+                                headers = {"Authorization": f"Bearer {config['api_key']}"}
+                                test_url = f"{config['base_url']}/models/{model_path}"
+                                
+                                try:
+                                    response = requests.get(test_url, headers=headers, timeout=5)
+                                    if response.status_code == 200:
+                                        saved_id = provider_manager.save_provider_model(
+                                            provider=provider,
+                                            model_name=model_name,
+                                            model_id=model_name,
+                                            category=category,
+                                            description=f"{category.title()} model from {provider}",
+                                            icon="⚡" if category == "flux" else "🎨",
+                                            endpoint_path=model_path,
+                                            pricing_tier="community",
+                                            expected_size="1024x1024" if category == "flux" else "512x512"
+                                        )
+                                        
+                                        if saved_id:
+                                            discovered_count[category] += 1
+                                except:
+                                    continue
+            
+            elif api_type == "openai_compatible":
+                client = OpenAI(api_key=config['api_key'], base_url=config['base_url'])
+                response = client.models.list()
+                
+                for model in response.data:
+                    model_id = model.id
+                    model_lower = model_id.lower()
+                    
+                    category = None
+                    if any(re.search(pattern, model_lower) for pattern in PROVIDER_MODEL_PATTERNS["flux"]["patterns"]):
+                        if "⚡ Flux 模型" in selected_categories:
+                            category = "flux"
+                    elif any(re.search(pattern, model_lower) for pattern in PROVIDER_MODEL_PATTERNS["stable-diffusion"]["patterns"]):
+                        if "🎨 Stable Diffusion" in selected_categories:
+                            category = "stable-diffusion"
+                    
+                    if category:
+                        saved_id = provider_manager.save_provider_model(
+                            provider=provider,
+                            model_name=model_id,
+                            model_id=model_id,
+                            category=category,
+                            description=f"{category.title()} model from {provider}",
+                            icon="⚡" if category == "flux" else "🎨",
+                            pricing_tier="api",
+                            expected_size="1024x1024" if category == "flux" else "512x512"
+                        )
+                        
+                        if saved_id:
+                            discovered_count[category] += 1
+            
+            total_discovered = sum(discovered_count.values())
+            if total_discovered > 0:
+                st.success(f"✅ 從 {provider} 發現 {total_discovered} 個模型")
+                for category, count in discovered_count.items():
+                    if count > 0:
+                        st.info(f"{'⚡ Flux' if category == 'flux' else '🎨 SD'}: {count} 個")
+            else:
+                st.info(f"ℹ️ 在 {provider} 未發現新模型")
+            
+            rerun_app()
+            
+        except Exception as e:
+            st.error(f"❌ 發現失敗: {str(e)}")
+
+def show_image_generation(provider: str, provider_info: Dict):
+    """顯示圖像生成界面"""
+    st.markdown("### 🎨 圖像生成")
+    st.info("🚀 圖像生成功能開發中，敬請期待！")
+
+def show_provider_performance(provider: str, provider_info: Dict):
+    """顯示供應商性能監控"""
+    st.markdown("### 📊 性能監控")
+    st.info("📊 性能監控功能開發中，敬請期待！")
+
+def show_provider_management():
+    """顯示供應商管理界面"""
+    if 'selected_provider' not in st.session_state:
+        show_provider_selector()
+        return
+    
+    selected_provider = st.session_state.selected_provider
+    all_providers = provider_manager.get_all_providers()
+    provider_info = all_providers[selected_provider]
+    
+    if provider_info.get('is_custom'):
+        st.subheader(f"{provider_info['icon']} {provider_info['display_name']} (自定義)")
     else:
-        st.markdown("### 🔧 自定義供應商")
-        st.info("尚未創建任何自定義供應商")
+        st.subheader(f"{provider_info['icon']} {provider_info['name']}")
+    
+    col_info, col_switch = st.columns([3, 1])
+    
+    with col_info:
+        st.info(f"📋 {provider_info['description']}")
+        st.caption(f"🔗 API 類型: {provider_info['api_type']} | 端點: {provider_info['base_url']}")
+        
+        features_badges = " ".join([f"`{feature}`" for feature in provider_info['features']])
+        st.markdown(f"**支持功能**: {features_badges}")
+    
+    with col_switch:
+        if st.button("🔄 切換供應商", use_container_width=True):
+            del st.session_state.selected_provider
+            rerun_app()
+    
+    management_tabs = st.tabs(["🔑 密鑰管理", "🤖 模型發現", "🎨 圖像生成", "📊 性能監控"])
+    
+    with management_tabs[0]:
+        show_provider_key_management(selected_provider, provider_info)
+    
+    with management_tabs[1]:
+        show_provider_model_discovery(selected_provider, provider_info)
+    
+    with management_tabs[2]:
+        show_image_generation(selected_provider, provider_info)
+    
+    with management_tabs[3]:
+        show_provider_performance(selected_provider, provider_info)
 
 def init_session_state():
     """初始化會話狀態"""
@@ -973,11 +992,10 @@ init_session_state()
 # 檢查 API 配置
 api_configured = st.session_state.api_config.get('api_key') is not None and st.session_state.api_config.get('api_key') != ''
 
-# 側邊欄 - 加入快速切換功能
+# 側邊欄
 with st.sidebar:
     st.markdown("### ⚡ 快速切換")
     
-    # 顯示當前配置
     if 'selected_provider' in st.session_state and api_configured:
         provider = st.session_state.selected_provider
         all_providers = provider_manager.get_all_providers()
@@ -995,13 +1013,12 @@ with st.sidebar:
     else:
         st.info("未配置 API")
     
-    # 快速切換配置按鈕（僅顯示收藏的）
     quick_configs = provider_manager.get_quick_switch_configs()
     favorite_configs = [c for c in quick_configs if c['is_favorite']]
     
     if favorite_configs:
         st.markdown("#### 🌟 收藏配置")
-        for config in favorite_configs[:3]:  # 最多顯示3個
+        for config in favorite_configs[:3]:
             all_providers = provider_manager.get_all_providers()
             provider_info = all_providers.get(config['provider'], {})
             icon = provider_info.get('icon', '🔧')
@@ -1017,46 +1034,24 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # 管理按鈕
-    if st.button("⚡ 管理快速切換", use_container_width=True):
-        st.session_state.show_quick_switch_manager = True
-        rerun_app()
-    
-    st.markdown("---")
-    
-    # 統計信息
     st.markdown("### 📊 統計")
     total_keys = len(provider_manager.get_api_keys())
     total_configs = len(quick_configs)
-    custom_providers_count = len(provider_manager.get_custom_providers())
     
     col_stat1, col_stat2 = st.columns(2)
     with col_stat1:
         st.metric("密鑰數", total_keys)
-        st.metric("快速配置", total_configs)
     with col_stat2:
-        st.metric("自定義供應商", custom_providers_count)
+        st.metric("快速配置", total_configs)
 
 # 主標題
 st.title("🎨 Flux & SD Generator Pro - 快速切換版")
 
 # 主要內容
-if 'show_quick_switch_manager' in st.session_state and st.session_state.show_quick_switch_manager:
-    show_quick_switch_manager()
-    if st.button("⬅️ 返回", key="back_from_quick_manager"):
-        del st.session_state.show_quick_switch_manager
-        rerun_app()
-
-elif 'selected_provider' not in st.session_state:
+if 'selected_provider' not in st.session_state:
     show_provider_selector()
 else:
-    # 顯示當前供應商管理界面
-    st.markdown("### 🚀 供應商管理界面")
-    st.info("📝 這裡可以加入完整的供應商管理功能（密鑰管理、模型發現、圖像生成等）")
-    
-    if st.button("🔄 重新選擇供應商"):
-        del st.session_state.selected_provider
-        rerun_app()
+    show_provider_management()
 
 # 頁腳
 st.markdown("---")
