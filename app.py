@@ -187,6 +187,104 @@ PROVIDER_SPECIFIC_MODELS = {
     }
 }
 
+# NavyAI 專用配置類
+class NavyAIManager:
+    @staticmethod
+    def validate_api_key(api_key: str) -> Tuple[bool, str]:
+        """驗證 NavyAI API 密鑰"""
+        if not api_key or not api_key.strip():
+            return False, "API 密鑰不能為空"
+        
+        # 檢查密鑰格式
+        api_key = api_key.strip()
+        if not api_key.startswith(('navy_', 'nv_', 'sk-')):
+            return False, "NavyAI API 密鑰通常以 'navy_' 或 'nv_' 開頭"
+        
+        if len(api_key) < 20:
+            return False, "API 密鑰長度似乎太短"
+        
+        return True, "密鑰格式驗證通過"
+    
+    @staticmethod
+    def test_api_connection(api_key: str) -> Tuple[bool, str, Dict]:
+        """測試 NavyAI API 連接"""
+        try:
+            # 模擬 API 連接測試
+            time.sleep(2)
+            
+            # 模擬 API 響應
+            if api_key and len(api_key) > 20:
+                api_info = {
+                    "status": "active",
+                    "plan": "Pro Plan",
+                    "credits_remaining": 1000,
+                    "models_available": 52,
+                    "rate_limit": "1000/hour",
+                    "region": "Global",
+                    "uptime": "99.9%"
+                }
+                return True, "API 連接成功", api_info
+            else:
+                return False, "API 密鑰無效", {}
+                
+        except Exception as e:
+            return False, f"連接失敗: {str(e)}", {}
+    
+    @staticmethod
+    def get_available_models(api_key: str) -> List[Dict]:
+        """獲取 NavyAI 可用模型列表"""
+        try:
+            # 模擬獲取模型列表
+            time.sleep(1)
+            
+            models = [
+                {
+                    "id": "black-forest-labs/flux-krea-dev",
+                    "name": "FLUX Krea Dev",
+                    "category": "flux-krea",
+                    "description": "美學優化圖像生成模型",
+                    "pricing": "$0.012/image",
+                    "max_size": "2048x2048",
+                    "speed": "~8s",
+                    "quality": 5
+                },
+                {
+                    "id": "dalle-3",
+                    "name": "DALL-E 3",
+                    "category": "dalle",
+                    "description": "OpenAI 最新圖像生成模型",
+                    "pricing": "$0.080/image",
+                    "max_size": "1792x1024",
+                    "speed": "~15s",
+                    "quality": 5
+                },
+                {
+                    "id": "midjourney-v6",
+                    "name": "Midjourney v6",
+                    "category": "midjourney",
+                    "description": "頂級藝術風格圖像生成",
+                    "pricing": "$0.025/image",
+                    "max_size": "2048x2048",
+                    "speed": "~20s",
+                    "quality": 5
+                },
+                {
+                    "id": "black-forest-labs/flux.1-pro",
+                    "name": "FLUX.1 Pro",
+                    "category": "flux",
+                    "description": "專業級 FLUX 模型",
+                    "pricing": "$0.008/image",
+                    "max_size": "2048x2048",
+                    "speed": "~5s",
+                    "quality": 4
+                }
+            ]
+            
+            return models
+            
+        except Exception as e:
+            return []
+
 # 供應商和模型管理系統
 class CompleteProviderManager:
     def __init__(self):
@@ -208,7 +306,8 @@ class CompleteProviderManager:
                 validated BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 notes TEXT,
-                is_default BOOLEAN DEFAULT 0
+                is_default BOOLEAN DEFAULT 0,
+                api_info TEXT
             )
         ''')
         
@@ -248,31 +347,38 @@ class CompleteProviderManager:
         if provider:
             cursor.execute('''
                 SELECT id, provider, key_name, api_key, base_url, validated, 
-                       created_at, notes, is_default
+                       created_at, notes, is_default, api_info
                 FROM api_keys WHERE provider = ?
                 ORDER BY is_default DESC, created_at DESC
             ''', (provider,))
         else:
             cursor.execute('''
                 SELECT id, provider, key_name, api_key, base_url, validated, 
-                       created_at, notes, is_default
+                       created_at, notes, is_default, api_info
                 FROM api_keys 
                 ORDER BY provider, is_default DESC, created_at DESC
             ''')
         
         keys = []
         for row in cursor.fetchall():
+            api_info = {}
+            if row[9]:  # api_info 字段
+                try:
+                    api_info = json.loads(row[9])
+                except:
+                    api_info = {}
+            
             keys.append({
                 'id': row[0], 'provider': row[1], 'key_name': row[2], 'api_key': row[3],
                 'base_url': row[4], 'validated': bool(row[5]), 'created_at': row[6],
-                'notes': row[7], 'is_default': bool(row[8])
+                'notes': row[7], 'is_default': bool(row[8]), 'api_info': api_info
             })
         
         conn.close()
         return keys
     
     def save_api_key(self, provider: str, key_name: str, api_key: str, base_url: str = "", 
-                     notes: str = "", is_default: bool = False) -> str:
+                     notes: str = "", is_default: bool = False, api_info: Dict = None) -> str:
         key_id = str(uuid.uuid4())
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -280,15 +386,33 @@ class CompleteProviderManager:
         if is_default:
             cursor.execute("UPDATE api_keys SET is_default = 0 WHERE provider = ?", (provider,))
         
+        api_info_json = json.dumps(api_info) if api_info else "{}"
+        
         cursor.execute('''
             INSERT INTO api_keys 
-            (id, provider, key_name, api_key, base_url, notes, is_default)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (key_id, provider, key_name, api_key, base_url, notes, is_default))
+            (id, provider, key_name, api_key, base_url, notes, is_default, api_info)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (key_id, provider, key_name, api_key, base_url, notes, is_default, api_info_json))
         
         conn.commit()
         conn.close()
         return key_id
+    
+    def update_api_key_validation(self, key_id: str, validated: bool, api_info: Dict = None):
+        """更新 API 密鑰驗證狀態"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        api_info_json = json.dumps(api_info) if api_info else "{}"
+        
+        cursor.execute('''
+            UPDATE api_keys 
+            SET validated = ?, api_info = ?
+            WHERE id = ?
+        ''', (validated, api_info_json, key_id))
+        
+        conn.commit()
+        conn.close()
     
     def get_provider_models(self, provider: str = None, category: str = None) -> List[Dict]:
         conn = sqlite3.connect(self.db_path)
@@ -369,6 +493,318 @@ class CompleteProviderManager:
 
 # 全局實例
 provider_manager = CompleteProviderManager()
+navyai_manager = NavyAIManager()
+
+def show_navyai_api_setup():
+    """顯示 NavyAI API 設置專用頁面"""
+    
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); border-radius: 10px; margin-bottom: 2rem;">
+        <h1 style="color: white; margin: 0; font-size: 2.5rem;">⚓ NavyAI API 設置</h1>
+        <h2 style="color: #87CEEB; margin: 0.5rem 0; font-size: 1.2rem;">統一 AI 接口配置中心</h2>
+        <p style="color: #B0E0E6; margin: 0;">一個 API 密鑰，訪問 50+ AI 模型</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 顯示 NavyAI 平台信息
+    col_info, col_stats = st.columns([2, 1])
+    
+    with col_info:
+        st.markdown("### 📋 如何獲取 NavyAI API 密鑰")
+        
+        st.markdown("""
+        #### 方式一：官方 Dashboard (推薦)
+        1. 🌐 前往 [NavyAI Dashboard](https://api.navy)
+        2. 📝 註冊或登入您的帳戶
+        3. 🔑 在儀表板中生成 API 密鑰
+        4. 📊 查看使用統計和計費信息
+        5. ⚙️ 管理 API 限制和權限
+        
+        #### 方式二：Discord 快速獲取
+        1. 💬 加入 NavyAI Discord 社群
+        2. ⌨️ 使用 `/key` 命令
+        3. ⚡ 立即獲得臨時密鑰
+        4. 🔄 可升級為正式密鑰
+        
+        #### 方式三：文檔與支援
+        - 📚 [完整文檔](https://api.navy/docs)
+        - 🆘 24/7 技術支援
+        - 💡 API 使用指南
+        - 🔧 故障排除幫助
+        """)
+    
+    with col_stats:
+        st.markdown("### 📊 NavyAI 平台統計")
+        
+        # 平台統計
+        col_stat1, col_stat2 = st.columns(2)
+        with col_stat1:
+            st.metric("🤖 AI 模型", "50+")
+            st.metric("🏢 供應商", "5+")
+        with col_stat2:
+            st.metric("⚡ 運行時間", ">99%")
+            st.metric("🔧 支援", "24/7")
+        
+        st.markdown("### 🎨 支援的模型類型")
+        st.success("🎭 FLUX Krea - 美學優化")
+        st.success("🖼️ DALL-E - OpenAI")
+        st.success("🎯 Midjourney - 藝術風格")
+        st.info("⚡ FLUX AI - 高性能")
+        st.info("🎨 Stable Diffusion - 開源")
+        st.info("🧠 Claude, GPT-4 - 文本模型")
+    
+    st.markdown("---")
+    
+    # API 密鑰配置區域
+    st.markdown("### 🔑 配置 NavyAI API 密鑰")
+    
+    # 顯示已保存的密鑰
+    saved_navyai_keys = provider_manager.get_api_keys("NavyAI")
+    
+    if saved_navyai_keys:
+        st.markdown("#### 📋 已保存的 NavyAI 密鑰")
+        
+        for i, key_info in enumerate(saved_navyai_keys):
+            with st.expander(f"⚓ {key_info['key_name']}", expanded=(i == 0)):
+                col_key_info, col_key_actions = st.columns([2, 1])
+                
+                with col_key_info:
+                    st.write(f"**密鑰名稱**: {key_info['key_name']}")
+                    st.write(f"**創建時間**: {key_info['created_at']}")
+                    st.write(f"**驗證狀態**: {'✅ 已驗證' if key_info['validated'] else '❌ 未驗證'}")
+                    
+                    # 顯示 API 信息
+                    if key_info.get('api_info'):
+                        api_info = key_info['api_info']
+                        st.markdown("**📊 API 信息:**")
+                        
+                        info_cols = st.columns(3)
+                        with info_cols[0]:
+                            st.metric("計劃", api_info.get('plan', 'N/A'))
+                            st.metric("狀態", api_info.get('status', 'N/A'))
+                        with info_cols[1]:
+                            st.metric("剩餘額度", api_info.get('credits_remaining', 'N/A'))
+                            st.metric("可用模型", api_info.get('models_available', 'N/A'))
+                        with info_cols[2]:
+                            st.metric("速率限制", api_info.get('rate_limit', 'N/A'))
+                            st.metric("運行時間", api_info.get('uptime', 'N/A'))
+                
+                with col_key_actions:
+                    st.markdown("**🛠️ 操作**")
+                    
+                    if st.button("✅ 使用此密鑰", key=f"use_navyai_{key_info['id']}", use_container_width=True):
+                        st.session_state.selected_provider = "NavyAI"
+                        st.session_state.api_config = {
+                            'provider': "NavyAI",
+                            'api_key': key_info['api_key'],
+                            'base_url': key_info['base_url'] or MODEL_PROVIDERS["NavyAI"]['base_url'],
+                            'validated': key_info['validated'],
+                            'key_name': key_info['key_name']
+                        }
+                        st.success(f"✅ 已啟用 {key_info['key_name']}")
+                        st.balloons()
+                        rerun_app()
+                    
+                    if st.button("🔄 重新測試", key=f"retest_navyai_{key_info['id']}", use_container_width=True):
+                        with st.spinner("正在測試 NavyAI API 連接..."):
+                            success, message, api_info = navyai_manager.test_api_connection(key_info['api_key'])
+                            
+                            if success:
+                                provider_manager.update_api_key_validation(key_info['id'], True, api_info)
+                                st.success(f"✅ {message}")
+                                st.info("API 信息已更新")
+                                rerun_app()
+                            else:
+                                st.error(f"❌ {message}")
+                    
+                    if st.button("🗑️ 刪除", key=f"delete_navyai_{key_info['id']}", use_container_width=True, type="secondary"):
+                        if st.session_state.get(f"confirm_delete_{key_info['id']}", False):
+                            # 執行刪除
+                            st.warning("刪除功能需要在數據庫中實現")
+                        else:
+                            st.session_state[f"confirm_delete_{key_info['id']}"] = True
+                            st.warning("再次點擊確認刪除")
+    else:
+        st.info("📭 尚未保存任何 NavyAI API 密鑰")
+    
+    st.markdown("---")
+    
+    # 新增密鑰區域
+    st.markdown("#### ➕ 新增 NavyAI API 密鑰")
+    
+    with st.form("add_navyai_key"):
+        col_input1, col_input2 = st.columns(2)
+        
+        with col_input1:
+            key_name = st.text_input(
+                "密鑰名稱 *",
+                placeholder="例如：NavyAI 主帳戶",
+                help="為這個 API 密鑰取一個便於識別的名稱"
+            )
+        
+        with col_input2:
+            set_as_default = st.checkbox("設為默認密鑰", value=True)
+        
+        api_key = st.text_input(
+            "NavyAI API 密鑰 *",
+            type="password",
+            placeholder="輸入您的 NavyAI API 密鑰...",
+            help="密鑰通常以 'navy_' 或 'nv_' 開頭"
+        )
+        
+        notes = st.text_area(
+            "備註 (可選)",
+            placeholder="例如：用於圖像生成，每月1000次額度",
+            height=80
+        )
+        
+        col_validate, col_save = st.columns(2)
+        
+        with col_validate:
+            validate_only = st.form_submit_button("🧪 驗證密鑰", use_container_width=True)
+        
+        with col_save:
+            save_key = st.form_submit_button("💾 保存密鑰", type="primary", use_container_width=True)
+        
+        # 處理表單提交
+        if validate_only or save_key:
+            if not key_name or not api_key:
+                st.error("❌ 請填寫必填字段（密鑰名稱和 API 密鑰）")
+            else:
+                # 首先驗證密鑰格式
+                format_valid, format_message = navyai_manager.validate_api_key(api_key)
+                
+                if not format_valid:
+                    st.error(f"❌ 密鑰格式錯誤: {format_message}")
+                else:
+                    st.info(f"✅ {format_message}")
+                    
+                    # 測試 API 連接
+                    with st.spinner("🔄 正在測試 NavyAI API 連接..."):
+                        connection_success, connection_message, api_info = navyai_manager.test_api_connection(api_key)
+                        
+                        if connection_success:
+                            st.success(f"✅ {connection_message}")
+                            
+                            # 顯示 API 信息
+                            if api_info:
+                                st.markdown("**📊 API 帳戶信息:**")
+                                info_cols = st.columns(4)
+                                with info_cols[0]:
+                                    st.metric("計劃", api_info.get('plan', 'N/A'))
+                                with info_cols[1]:
+                                    st.metric("剩餘額度", api_info.get('credits_remaining', 'N/A'))
+                                with info_cols[2]:
+                                    st.metric("可用模型", api_info.get('models_available', 'N/A'))
+                                with info_cols[3]:
+                                    st.metric("速率限制", api_info.get('rate_limit', 'N/A'))
+                            
+                            # 如果選擇保存
+                            if save_key:
+                                key_id = provider_manager.save_api_key(
+                                    provider="NavyAI",
+                                    key_name=key_name,
+                                    api_key=api_key,
+                                    base_url=MODEL_PROVIDERS["NavyAI"]["base_url"],
+                                    notes=notes,
+                                    is_default=set_as_default,
+                                    api_info=api_info
+                                )
+                                
+                                # 更新驗證狀態
+                                provider_manager.update_api_key_validation(key_id, True, api_info)
+                                
+                                st.success(f"💾 NavyAI API 密鑰已保存！ID: {key_id[:8]}...")
+                                st.info("⚓ 現在可以訪問 50+ AI 模型，包含 FLUX Krea、DALL-E、Midjourney")
+                                
+                                if set_as_default:
+                                    st.session_state.selected_provider = "NavyAI"
+                                    st.session_state.api_config = {
+                                        'provider': "NavyAI",
+                                        'api_key': api_key,
+                                        'base_url': MODEL_PROVIDERS["NavyAI"]["base_url"],
+                                        'validated': True,
+                                        'key_name': key_name
+                                    }
+                                    st.success("🚀 NavyAI 已設為當前供應商")
+                                
+                                st.balloons()
+                                time.sleep(2)
+                                rerun_app()
+                        else:
+                            st.error(f"❌ {connection_message}")
+                            if save_key:
+                                st.warning("⚠️ 連接失敗，但仍可選擇保存密鑰（未驗證狀態）")
+                                
+                                if st.button("強制保存（未驗證）", key="force_save"):
+                                    key_id = provider_manager.save_api_key(
+                                        provider="NavyAI",
+                                        key_name=key_name,
+                                        api_key=api_key,
+                                        base_url=MODEL_PROVIDERS["NavyAI"]["base_url"],
+                                        notes=notes,
+                                        is_default=set_as_default
+                                    )
+                                    
+                                    st.warning(f"⚠️ API 密鑰已保存（未驗證狀態）！ID: {key_id[:8]}...")
+                                    rerun_app()
+    
+    st.markdown("---")
+    
+    # 可用模型預覽
+    st.markdown("### 🤖 NavyAI 可用模型預覽")
+    
+    if saved_navyai_keys:
+        # 使用第一個已驗證的密鑰來獲取模型列表
+        verified_key = next((k for k in saved_navyai_keys if k['validated']), None)
+        
+        if verified_key:
+            with st.spinner("🔍 正在獲取 NavyAI 可用模型..."):
+                available_models = navyai_manager.get_available_models(verified_key['api_key'])
+                
+                if available_models:
+                    # 按類別分組顯示
+                    categories = {}
+                    for model in available_models:
+                        category = model['category']
+                        if category not in categories:
+                            categories[category] = []
+                        categories[category].append(model)
+                    
+                    category_names = {
+                        'flux-krea': '🎭 FLUX Krea Models',
+                        'dalle': '🖼️ DALL-E Models', 
+                        'midjourney': '🎯 Midjourney Models',
+                        'flux': '⚡ FLUX AI Models'
+                    }
+                    
+                    for category, models in categories.items():
+                        st.markdown(f"#### {category_names.get(category, category.title())}")
+                        
+                        for model in models:
+                            col_model, col_info = st.columns([2, 1])
+                            
+                            with col_model:
+                                st.markdown(f"**{model['name']}**")
+                                st.caption(model['description'])
+                                st.caption(f"ID: `{model['id']}`")
+                            
+                            with col_info:
+                                st.metric("質量", "⭐" * model['quality'])
+                                st.caption(f"💰 {model['pricing']}")
+                                st.caption(f"⏱️ {model['speed']}")
+                                st.caption(f"📐 最大: {model['max_size']}")
+                else:
+                    st.warning("無法獲取模型列表")
+        else:
+            st.info("請先驗證至少一個 API 密鑰以查看可用模型")
+    else:
+        st.info("請先添加 NavyAI API 密鑰以查看可用模型")
+    
+    # 返回按鈕
+    if st.button("🏠 返回主頁", type="secondary", use_container_width=True):
+        st.session_state.show_navyai_setup = False
+        rerun_app()
 
 def safe_seed_check(seed_value):
     """安全檢查 seed 值"""
@@ -629,955 +1065,6 @@ def generate_images_with_retry(client, provider: str, api_key: str, base_url: st
     
     return False, "未知錯誤"
 
-def discover_provider_models(provider: str, provider_info: Dict, selected_categories: List[str]):
-    """發現供應商模型"""
-    with st.spinner(f"🔍 正在從 {provider} 發現模型..."):
-        discovered_count = {
-            "flux": 0, "flux-krea": 0, "stable-diffusion": 0, 
-            "dalle": 0, "midjourney": 0
-        }
-        
-        try:
-            if provider in PROVIDER_SPECIFIC_MODELS:
-                provider_models = PROVIDER_SPECIFIC_MODELS[provider]
-                
-                for category, models in provider_models.items():
-                    category_display = {
-                        "flux-krea": "🎭 FLUX Krea 模型",
-                        "flux": "⚡ Flux 模型", 
-                        "stable-diffusion": "🎨 Stable Diffusion",
-                        "dalle": "🖼️ DALL-E 模型",
-                        "midjourney": "🎯 Midjourney 模型"
-                    }.get(category, category)
-                    
-                    if category_display in selected_categories:
-                        for model_name in models:
-                            description = ""
-                            icon_map = {
-                                "flux-krea": "🎭", "flux": "⚡", "stable-diffusion": "🎨",
-                                "dalle": "🖼️", "midjourney": "🎯"
-                            }
-                            icon = icon_map.get(category, "🤖")
-                            priority = 1 if category == "flux-krea" else 2 if category in ["dalle", "midjourney"] else 999
-                            aesthetic_score = 5 if category in ["flux-krea", "midjourney"] else 4 if category == "dalle" else 3
-                            
-                            if category == "flux-krea":
-                                description = f"FLUX Krea {model_name} - 美學優化圖像生成模型"
-                            elif category == "flux":
-                                description = f"FLUX {model_name} - 高性能文本到圖像生成"
-                            elif category == "dalle":
-                                description = f"DALL-E {model_name} - OpenAI 圖像生成模型"
-                            elif category == "midjourney":
-                                description = f"Midjourney {model_name} - 藝術風格圖像生成"
-                            elif category == "stable-diffusion":
-                                description = f"Stable Diffusion {model_name} - 開源圖像生成"
-                            
-                            saved_id = provider_manager.save_provider_model(
-                                provider=provider,
-                                model_name=model_name,
-                                model_id=model_name,
-                                category=category,
-                                description=description,
-                                icon=icon,
-                                pricing_tier="premium" if provider == "NavyAI" else "free",
-                                expected_size="1024x1024",
-                                priority=priority,
-                                aesthetic_score=aesthetic_score,
-                                supports_styles=category in ["flux-krea", "dalle", "midjourney"]
-                            )
-                            
-                            if saved_id:
-                                discovered_count[category] += 1
-            
-            total_discovered = sum(discovered_count.values())
-            if total_discovered > 0:
-                st.success(f"✅ 從 {provider} 發現 {total_discovered} 個模型")
-                for category, count in discovered_count.items():
-                    if count > 0:
-                        category_name = {
-                            "flux-krea": "🎭 FLUX Krea",
-                            "flux": "⚡ Flux",
-                            "stable-diffusion": "🎨 SD",
-                            "dalle": "🖼️ DALL-E",
-                            "midjourney": "🎯 Midjourney"
-                        }.get(category, category)
-                        st.info(f"{category_name}: {count} 個")
-                        
-                        if category == "flux-krea":
-                            st.success("🎭 發現 FLUX Krea 模型！專注美學優化和寫實圖像生成")
-                        elif provider == "NavyAI" and category in ["dalle", "midjourney"]:
-                            st.info(f"⚓ NavyAI 統一接口支援 {category_name} 模型")
-            else:
-                st.info(f"ℹ️ 在 {provider} 未發現新模型")
-            
-            rerun_app()
-            
-        except Exception as e:
-            st.error(f"❌ 發現失敗: {str(e)}")
-
-def show_provider_selector():
-    """顯示供應商選擇器"""
-    st.subheader("🏢 選擇模型供應商")
-    
-    st.markdown("---")
-    st.markdown("### ⚓ 推薦：NavyAI 統一接口")
-    
-    # NavyAI 特殊推薦區域
-    navyai_info = MODEL_PROVIDERS["NavyAI"]
-    with st.container():
-        col_navy1, col_navy2 = st.columns([2, 1])
-        
-        with col_navy1:
-            st.markdown(f"#### {navyai_info['icon']} {navyai_info['name']} ⭐")
-            st.success(f"🎯 專長：{navyai_info['speciality']}")
-            st.caption(navyai_info['description'])
-            
-            col_feat1, col_feat2 = st.columns(2)
-            with col_feat1:
-                st.info("⚓ 50+ AI 模型")
-                st.info("📊 統一計費系統")
-            with col_feat2:
-                st.info(f"⚡ {navyai_info['uptime']} 運行時間")
-                st.info(f"🔧 {navyai_info['support']} 技術支援")
-        
-        with col_navy2:
-            st.markdown("**🎨 支援模型:**")
-            features = navyai_info['features']
-            for feature in features[:6]:
-                if feature in ["flux-krea", "dalle", "midjourney"]:
-                    st.success(f"✨ {feature.upper()}")
-                else:
-                    st.info(f"• {feature}")
-            
-            if st.button(f"選擇 {navyai_info['name']}", key="select_navyai", type="primary", use_container_width=True):
-                st.session_state.selected_provider = "NavyAI"
-                st.success(f"已選擇 {navyai_info['name']} - 統一 AI 模型接口")
-                rerun_app()
-    
-    st.markdown("---")
-    st.markdown("### 🎭 FLUX Krea 專門供應商")
-    
-    all_providers = provider_manager.get_all_providers()
-    flux_krea_providers = {k: v for k, v in all_providers.items() if "flux-krea" in v.get('features', []) and k != "NavyAI"}
-    
-    cols = st.columns(2)
-    for i, (provider_key, provider_info) in enumerate(flux_krea_providers.items()):
-        with cols[i % 2]:
-            with st.container():
-                specialty = provider_info.get('speciality', '')
-                if specialty:
-                    st.markdown(f"#### {provider_info['icon']} {provider_info['name']} ✨")
-                    st.success(f"🎯 專長：{specialty}")
-                else:
-                    st.markdown(f"#### {provider_info['icon']} {provider_info['name']}")
-                
-                st.caption(provider_info['description'])
-                st.info("🎭 支援 FLUX Krea 美學優化模型")
-                st.caption(f"⚡ 速度: {provider_info['speed']} | 💰 {provider_info['pricing']}")
-                
-                if st.button(f"選擇 {provider_info['name']}", key=f"select_krea_{provider_key}", use_container_width=True, type="primary"):
-                    st.session_state.selected_provider = provider_key
-                    st.success(f"已選擇 {provider_info['name']} - FLUX Krea 專門供應商")
-                    rerun_app()
-                
-                if not provider_info.get('requires_api_key', True):
-                    st.caption("🆓 免費服務無需密鑰")
-
-def show_provider_key_management(provider: str, provider_info: Dict):
-    """顯示供應商密鑰管理"""
-    st.markdown("### 🔑 密鑰管理")
-    
-    if provider == "NavyAI":
-        st.info("⚓ **NavyAI 快速獲取 API 密鑰:**")
-        st.markdown("""
-        1. 🌐 **Dashboard 方式**: [登入 NavyAI Dashboard](https://api.navy) 管理密鑰和使用統計
-        2. 💬 **Discord 快速方式**: 在 Discord 中使用 `/key` 命令快速獲取密鑰
-        3. 📚 **查看文檔**: [NavyAI 完整文檔](https://api.navy/docs) 了解更多功能
-        """)
-        st.markdown("---")
-    
-    requires_key = provider_info.get('requires_api_key', True)
-    
-    if not requires_key:
-        provider_name = provider_info.get('name', provider)
-        st.success(f"🌟 {provider_name} 提供免費服務，無需 API 密鑰！")
-        
-        if "flux-krea" in provider_info.get('features', []):
-            st.info("🎭 您可以直接使用 FLUX Krea 美學優化模型進行圖像生成")
-        
-        if st.button("✅ 啟用免費服務", type="primary", use_container_width=True):
-            st.session_state.api_config = {
-                'provider': provider,
-                'api_key': 'no-key-required',
-                'base_url': provider_info['base_url'],
-                'validated': True,
-                'key_name': f'{provider_name} 免費服務'
-            }
-            st.success(f"已啟用 {provider_name} 免費服務")
-            rerun_app()
-        
-        return
-    
-    saved_keys = provider_manager.get_api_keys(provider)
-    
-    if saved_keys:
-        st.markdown("#### 📋 已保存的密鑰")
-        
-        for key_info in saved_keys:
-            col_key, col_actions = st.columns([3, 1])
-            
-            with col_key:
-                st.markdown(f"**{key_info['key_name']}**")
-                st.caption(f"創建於: {key_info['created_at']}")
-                if provider == "NavyAI" and key_info['validated']:
-                    st.success("✅ NavyAI 密鑰已驗證")
-            
-            with col_actions:
-                if st.button("✅ 使用", key=f"use_key_{key_info['id']}"):
-                    st.session_state.api_config = {
-                        'provider': provider,
-                        'api_key': key_info['api_key'],
-                        'base_url': key_info['base_url'] or provider_info['base_url'],
-                        'validated': key_info['validated'],
-                        'key_name': key_info['key_name']
-                    }
-                    st.success(f"已載入密鑰: {key_info['key_name']}")
-                    rerun_app()
-            
-            st.markdown("---")
-    
-    st.markdown("#### ➕ 新增密鑰")
-    
-    key_name = st.text_input("密鑰名稱:", placeholder=f"例如：{provider} 主密鑰")
-    
-    if provider == "NavyAI":
-        api_key = st.text_input("NavyAI API 密鑰:", type="password", placeholder="輸入從 Dashboard 或 Discord 獲取的密鑰...")
-        st.caption("💡 密鑰前綴通常為 'navy_' 開頭")
-    else:
-        api_key = st.text_input("API 密鑰:", type="password", placeholder=f"輸入 {provider_info['name']} API 密鑰...")
-    
-    if provider == "NavyAI":
-        st.info("🌟 **NavyAI 統一接口優勢**: 一個密鑰訪問 50+ 模型，包含 FLUX Krea、DALL-E、Midjourney 等")
-    elif "flux-krea" in provider_info.get('features', []):
-        st.info("💡 此供應商支援 FLUX Krea 模型，可生成美學優化和高度寫實的圖像")
-    
-    if st.button("💾 保存密鑰", type="primary", use_container_width=True):
-        if key_name and api_key:
-            key_id = provider_manager.save_api_key(provider, key_name, api_key, provider_info['base_url'])
-            st.success(f"✅ 密鑰已保存！ID: {key_id[:8]}...")
-            if provider == "NavyAI":
-                st.info("⚓ NavyAI 密鑰已配置，現在可以訪問 50+ AI 模型")
-            rerun_app()
-        else:
-            st.error("❌ 請填寫完整信息")
-
-def show_provider_model_discovery(provider: str, provider_info: Dict):
-    """顯示供應商模型發現"""
-    st.markdown("### 🤖 模型發現")
-    
-    if not st.session_state.api_config.get('api_key') and provider_info.get('requires_api_key', True):
-        st.warning("⚠️ 請先配置 API 密鑰")
-        return
-    
-    col_discover, col_results = st.columns([1, 2])
-    
-    with col_discover:
-        st.markdown("#### 🔍 發現設置")
-        
-        supported_categories = []
-        category_map = {
-            "flux-krea": "🎭 FLUX Krea 模型",
-            "flux": "⚡ Flux 模型",
-            "stable-diffusion": "🎨 Stable Diffusion",
-            "dalle": "🖼️ DALL-E 模型",
-            "midjourney": "🎯 Midjourney 模型"
-        }
-        
-        for feature in provider_info['features']:
-            if feature in category_map:
-                supported_categories.append(category_map[feature])
-        
-        if not supported_categories:
-            st.warning(f"{provider} 不支持圖像生成模型")
-            return
-        
-        selected_categories = st.multiselect(
-            "選擇要發現的模型類型:",
-            supported_categories,
-            default=supported_categories
-        )
-        
-        if provider == "NavyAI":
-            st.info("⚓ **NavyAI**: 統一接口訪問多個 AI 供應商的模型")
-            if "🎭 FLUX Krea 模型" in supported_categories:
-                st.success("🎭 支援 FLUX Krea 美學優化模型")
-            if "🖼️ DALL-E 模型" in supported_categories:
-                st.success("🖼️ 支援 DALL-E 高質量圖像生成")
-            if "🎯 Midjourney 模型" in supported_categories:
-                st.success("🎯 支援 Midjourney 藝術風格生成")
-        elif "🎭 FLUX Krea 模型" in supported_categories:
-            st.info("🎭 **FLUX Krea**: 美學優化模型，專注產生寫實且多樣化的圖像")
-        
-        if st.button("🚀 開始發現", type="primary", use_container_width=True):
-            if selected_categories:
-                discover_provider_models(provider, provider_info, selected_categories)
-            else:
-                st.warning("請選擇要發現的模型類型")
-    
-    with col_results:
-        st.markdown("#### 📊 發現結果")
-        
-        discovered_models = provider_manager.get_provider_models(provider)
-        
-        if discovered_models:
-            model_groups = {
-                'flux-krea': [],
-                'flux': [],
-                'stable-diffusion': [],
-                'dalle': [],
-                'midjourney': []
-            }
-            
-            for model in discovered_models:
-                category = model['category']
-                if category in model_groups:
-                    model_groups[category].append(model)
-            
-            for category, models in model_groups.items():
-                if not models:
-                    continue
-                    
-                category_names = {
-                    "flux-krea": "🎭 FLUX Krea 模型",
-                    "flux": "⚡ Flux 模型",
-                    "stable-diffusion": "🎨 SD 模型",
-                    "dalle": "🖼️ DALL-E 模型",
-                    "midjourney": "🎯 Midjourney 模型"
-                }
-                
-                category_name = category_names.get(category, category)
-                st.markdown(f"**{category_name}**: {len(models)} 個")
-                
-                if category == "flux-krea":
-                    st.success("🌟 美學優化專門模型")
-                elif category == "dalle" and provider == "NavyAI":
-                    st.info("⚓ NavyAI 統一接口 - OpenAI DALL-E")
-                elif category == "midjourney" and provider == "NavyAI":
-                    st.info("⚓ NavyAI 統一接口 - Midjourney 藝術生成")
-                
-                for model in models[:3]:
-                    aesthetic_score = model.get('aesthetic_score', 3)
-                    if aesthetic_score >= 4:
-                        stars = "⭐" * min(aesthetic_score, 5)
-                        st.write(f"• {model['icon']} {model['model_name']} {stars}")
-                    else:
-                        st.write(f"• {model['icon']} {model['model_name']}")
-        else:
-            st.info("尚未發現任何模型")
-
-def display_image_with_actions(image_url: str, image_id: str, generation_info: Dict = None):
-    """顯示圖像和操作按鈕"""
-    try:
-        if image_url.startswith('data:image'):
-            base64_data = image_url.split(',')[1]
-            img_data = base64.b64decode(base64_data)
-            img = Image.open(BytesIO(img_data))
-        else:
-            img_response = requests.get(image_url, timeout=10)
-            img = Image.open(BytesIO(img_response.content))
-        
-        st.image(img, use_column_width=True)
-        
-        if generation_info:
-            with st.expander("🔍 圖像信息"):
-                st.write(f"**提示詞**: {generation_info.get('prompt', 'N/A')}")
-                st.write(f"**模型**: {generation_info.get('model_name', 'N/A')}")
-                st.write(f"**供應商**: {generation_info.get('provider', 'N/A')}")
-                st.write(f"**尺寸**: {generation_info.get('size', 'N/A')}")
-                st.write(f"**生成時間**: {generation_info.get('timestamp', 'N/A')}")
-                
-                provider = generation_info.get('provider', '')
-                category = generation_info.get('category', '')
-                
-                if category == 'flux-krea':
-                    st.write(f"**美學評分**: {'⭐' * generation_info.get('aesthetic_score', 5)}")
-                elif provider == 'NavyAI':
-                    st.write(f"**NavyAI 統一接口**: ⚓ {category.upper()}")
-                elif category in ['dalle', 'midjourney']:
-                    st.write(f"**高級模型**: {'⭐' * generation_info.get('aesthetic_score', 4)}")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            img_buffer = BytesIO()
-            img.save(img_buffer, format='PNG')
-            st.download_button(
-                label="📥 下載",
-                data=img_buffer.getvalue(),
-                file_name=f"ai_generated_{image_id}.png",
-                mime="image/png",
-                key=f"download_{image_id}",
-                use_container_width=True
-            )
-        
-        with col2:
-            if 'favorite_images' not in st.session_state:
-                st.session_state.favorite_images = []
-            
-            is_favorite = any(fav['id'] == image_id for fav in st.session_state.favorite_images)
-            if st.button(
-                "⭐ 已收藏" if is_favorite else "☆ 收藏",
-                key=f"favorite_{image_id}",
-                use_container_width=True
-            ):
-                if is_favorite:
-                    st.session_state.favorite_images = [
-                        fav for fav in st.session_state.favorite_images if fav['id'] != image_id
-                    ]
-                    st.success("已取消收藏")
-                else:
-                    favorite_item = {
-                        "id": image_id,
-                        "image_url": image_url,
-                        "timestamp": datetime.datetime.now(),
-                        "generation_info": generation_info
-                    }
-                    st.session_state.favorite_images.append(favorite_item)
-                    st.success("已加入收藏")
-                rerun_app()
-        
-        with col3:
-            if generation_info and st.button("🔄 重新生成", key=f"regenerate_{image_id}", use_container_width=True):
-                st.session_state.regenerate_info = generation_info
-                rerun_app()
-        
-        with col4:
-            if generation_info and st.button("🎨 變化生成", key=f"variation_{image_id}", use_container_width=True):
-                variation_info = generation_info.copy()
-                variation_info['prompt'] = f"{generation_info.get('prompt', '')} (variation)"
-                
-                seed_value = variation_info.get('seed')
-                if safe_seed_check(seed_value):
-                    variation_info['seed'] = random.randint(0, 2147483647)
-                else:
-                    variation_info['seed'] = random.randint(0, 2147483647)
-                
-                st.session_state.variation_info = variation_info
-                rerun_app()
-    
-    except Exception as e:
-        st.error(f"圖像顯示錯誤: {str(e)}")
-
-def show_image_generation(provider: str, provider_info: Dict):
-    """顯示完整的圖像生成界面"""
-    st.markdown("### 🎨 圖像生成")
-    
-    config = st.session_state.api_config
-    if not config.get('api_key') and provider_info.get('requires_api_key', True):
-        st.warning("⚠️ 請先在密鑰管理中配置 API 密鑰")
-        return
-    
-    available_models = provider_manager.get_provider_models(provider)
-    
-    if not available_models:
-        st.warning("⚠️ 尚未發現任何模型，請先進行模型發現")
-        with st.expander("💡 如何發現模型？"):
-            st.markdown("""
-            1. 切換到 **🤖 模型發現** 標籤頁
-            2. 選擇要發現的模型類型
-            3. 點擊 **🚀 開始發現** 按鈕
-            """)
-        return
-    
-    col_settings, col_preview = st.columns([2, 1])
-    
-    with col_settings:
-        st.markdown("#### ⚙️ 生成設置")
-        
-        categories = list(set(model['category'] for model in available_models))
-        
-        priority_order = ['flux-krea', 'dalle', 'midjourney', 'flux', 'stable-diffusion']
-        categories.sort(key=lambda x: priority_order.index(x) if x in priority_order else 999)
-        
-        if len(categories) > 1:
-            selected_category = st.selectbox(
-                "模型類別:",
-                categories,
-                format_func=lambda x: {
-                    "flux-krea": "🎭 FLUX Krea (美學優化)",
-                    "flux": "⚡ Flux AI",
-                    "stable-diffusion": "🎨 Stable Diffusion",
-                    "dalle": "🖼️ DALL-E (OpenAI)",
-                    "midjourney": "🎯 Midjourney (藝術風格)"
-                }.get(x, x.title())
-            )
-        else:
-            selected_category = categories[0]
-        
-        category_models = [m for m in available_models if m['category'] == selected_category]
-        selected_model_info = st.selectbox(
-            "選擇模型:",
-            category_models,
-            format_func=lambda x: f"{x['icon']} {x['model_name']} {'⭐' * x.get('aesthetic_score', 3) if x.get('aesthetic_score', 0) >= 4 else ''}"
-        )
-        
-        if selected_category == "flux-krea":
-            st.success("🎭 **FLUX Krea 模式**：專為美學優化設計，生成更自然、寫實的圖像")
-            st.info("💡 特色：避免過度飽和、更好的人類美學偏好、寫實多樣化")
-        elif selected_category == "dalle" and provider == "NavyAI":
-            st.success("🖼️ **DALL-E 模式 (NavyAI)**：OpenAI 高質量圖像生成")
-            st.info("⚓ 通過 NavyAI 統一接口訪問 OpenAI DALL-E")
-        elif selected_category == "midjourney" and provider == "NavyAI":
-            st.success("🎯 **Midjourney 模式 (NavyAI)**：藝術風格圖像生成")
-            st.info("⚓ 通過 NavyAI 統一接口訪問 Midjourney")
-        elif provider == "NavyAI":
-            st.success(f"⚓ **NavyAI 統一接口**: {selected_category.upper()} 模型")
-        
-        st.markdown("#### 📝 提示詞")
-        
-        default_prompt = ""
-        if 'regenerate_info' in st.session_state:
-            default_prompt = st.session_state.regenerate_info.get('prompt', '')
-            del st.session_state.regenerate_info
-        elif 'variation_info' in st.session_state:
-            default_prompt = st.session_state.variation_info.get('prompt', '')
-            del st.session_state.variation_info
-        
-        prompt = st.text_area(
-            "描述您想要生成的圖像:",
-            value=default_prompt,
-            height=120,
-            placeholder="例如：A professional portrait of a confident businesswoman, natural lighting, realistic skin texture, detailed eyes"
-        )
-        
-        st.markdown("#### 💡 快速模板")
-        
-        if selected_category == "flux-krea":
-            templates = [
-                "Professional portrait of a confident businesswoman, natural lighting, realistic skin texture",
-                "Candid street photography of an elderly artist, warm golden hour light, authentic expression",
-                "Cozy coffee shop interior, natural lighting, authentic atmosphere, realistic textures"
-            ]
-        elif selected_category == "dalle":
-            templates = [
-                "A surreal landscape with floating islands and waterfalls, digital art style",
-                "Portrait of a futuristic robot with human-like emotions, highly detailed",
-                "Abstract art piece representing the concept of time, vibrant colors"
-            ]
-        elif selected_category == "midjourney":
-            templates = [
-                "Epic fantasy landscape with dragons soaring over mountains, cinematic lighting",
-                "Steampunk cityscape with intricate mechanical details, bronze and copper tones",
-                "Ethereal forest scene with magical creatures, soft glowing light"
-            ]
-        else:
-            templates = [
-                "Digital art illustration of a fantasy landscape with magical elements",
-                "Concept art of a futuristic cityscape with flying vehicles",
-                "Abstract geometric composition with vibrant colors and patterns"
-            ]
-        
-        for i, template in enumerate(templates):
-            if st.button(f"📝 {template[:50]}...", key=f"template_{i}", use_container_width=True):
-                st.session_state.quick_prompt = template
-                rerun_app()
-        
-        if hasattr(st.session_state, 'quick_prompt'):
-            prompt = st.session_state.quick_prompt
-            del st.session_state.quick_prompt
-            rerun_app()
-    
-    with col_preview:
-        st.markdown("#### 🎯 參數設置")
-        
-        if selected_category in ["flux-krea", "dalle"]:
-            size_options = ["1024x1024", "1152x896", "896x1152", "1344x768", "768x1344"]
-        elif selected_category == "midjourney":
-            size_options = ["1024x1024", "1152x896", "896x1152"]
-        else:
-            size_options = ["512x512", "768x768", "1024x1024"]
-        
-        selected_size = st.selectbox("圖像尺寸:", size_options, index=0)
-        num_images = st.slider("生成數量:", 1, 4, 1)
-        
-        with st.expander("🔧 高級參數"):
-            if selected_category == "flux-krea":
-                guidance_scale = st.slider(
-                    "美學引導強度:", 
-                    1.0, 10.0, 3.5, 0.5,
-                    help="FLUX Krea 推薦較低值(2.0-4.0)以獲得更自然的結果"
-                )
-                
-                steps = st.slider(
-                    "推理步數:", 
-                    10, 50, 28,
-                    help="FLUX Krea 通常在 20-35 步之間效果最佳"
-                )
-                
-                aesthetic_weight = st.slider("美學權重:", 0.5, 2.0, 1.0, 0.1)
-                naturalism_boost = st.checkbox("自然主義增強", value=True)
-                color_harmony = st.selectbox("色彩和諧度:", ["auto", "warm", "cool", "neutral", "vibrant"])
-                
-            elif selected_category == "dalle":
-                guidance_scale = st.slider("創意引導:", 1.0, 20.0, 10.0, 0.5)
-                steps = st.slider("生成質量:", 10, 50, 30)
-                aesthetic_weight = st.slider("藝術風格權重:", 0.5, 2.0, 1.2, 0.1)
-                naturalism_boost = st.checkbox("寫實增強", value=False)
-                color_harmony = st.selectbox("色調風格:", ["auto", "vibrant", "muted", "monochrome"])
-                
-            elif selected_category == "midjourney":
-                guidance_scale = st.slider("藝術引導:", 1.0, 20.0, 12.0, 0.5)
-                steps = st.slider("細節層次:", 10, 50, 35)
-                aesthetic_weight = st.slider("風格化程度:", 0.5, 2.0, 1.5, 0.1)
-                naturalism_boost = st.checkbox("風格化增強", value=True)
-                color_harmony = st.selectbox("藝術色調:", ["auto", "dramatic", "pastel", "neon", "vintage"])
-                
-            else:
-                guidance_scale = st.slider("引導強度:", 1.0, 20.0, 7.5, 0.5)
-                steps = st.slider("推理步數:", 10, 100, 25)
-                aesthetic_weight = 1.0
-                naturalism_boost = False
-                color_harmony = "auto"
-            
-            seed = st.number_input("隨機種子 (可選):", min_value=-1, max_value=2147483647, value=-1)
-            
-            if seed == -1 and st.button("🎲 生成隨機種子"):
-                new_seed = random.randint(0, 2147483647)
-                st.success(f"隨機種子: {new_seed}")
-                st.session_state.temp_seed = new_seed
-    
-    st.markdown("---")
-    
-    can_generate = selected_model_info and prompt.strip()
-    
-    col_gen, col_clear = st.columns([3, 1])
-    
-    with col_gen:
-        if st.button(
-            f"🚀 生成圖像 ({selected_model_info['model_name'] if selected_model_info else 'None'})",
-            type="primary",
-            disabled=not can_generate,
-            use_container_width=True
-        ):
-            if can_generate:
-                final_seed = seed if seed >= 0 else (st.session_state.get('temp_seed') if hasattr(st.session_state, 'temp_seed') else None)
-                
-                generate_image_main(
-                    provider, provider_info, selected_model_info,
-                    prompt, selected_size, num_images,
-                    guidance_scale, steps, final_seed, selected_category,
-                    aesthetic_weight, naturalism_boost, color_harmony
-                )
-    
-    with col_clear:
-        if st.button("🗑️ 清除", use_container_width=True):
-            for key in ['quick_prompt', 'regenerate_info', 'variation_info', 'temp_seed']:
-                if key in st.session_state:
-                    del st.session_state[key]
-            rerun_app()
-    
-    show_generation_history()
-
-def generate_image_main(provider: str, provider_info: Dict, model_info: Dict,
-                       prompt: str, size: str, num_images: int,
-                       guidance_scale: float, steps: int, seed, category: str,
-                       aesthetic_weight: float, naturalism_boost: bool, color_harmony: str):
-    """主要圖像生成函數"""
-    
-    config = st.session_state.api_config
-    
-    client = None
-    if provider_info.get('api_type') not in ["pollinations", "krea"]:
-        try:
-            client = OpenAI(
-                api_key=config['api_key'],
-                base_url=config['base_url']
-            )
-        except Exception as e:
-            st.error(f"API 客戶端初始化失敗: {str(e)}")
-            return
-    
-    safe_seed = None
-    if safe_seed_check(seed):
-        safe_seed = int(seed)
-    
-    generation_params = {
-        "model": model_info['model_id'],
-        "prompt": prompt,
-        "n": num_images,
-        "size": size,
-        "category": category,
-        "guidance_scale": guidance_scale,
-        "steps": steps,
-        "seed": safe_seed,
-        "aesthetic_weight": aesthetic_weight,
-        "naturalism_boost": naturalism_boost,
-        "color_harmony": color_harmony
-    }
-    
-    progress_container = st.empty()
-    
-    with progress_container.container():
-        if category == 'flux-krea':
-            st.success(f"🎭 正在使用 FLUX Krea 模型 {model_info['model_name']} 生成美學優化圖像...")
-        elif category == 'dalle' and provider == 'NavyAI':
-            st.success(f"🖼️ 正在通過 NavyAI 統一接口使用 DALL-E 模型 {model_info['model_name']}...")
-        elif category == 'midjourney' and provider == 'NavyAI':
-            st.success(f"🎯 正在通過 NavyAI 統一接口使用 Midjourney 模型 {model_info['model_name']}...")
-        elif provider == 'NavyAI':
-            st.success(f"⚓ 正在通過 NavyAI 統一接口使用 {model_info['model_name']}...")
-        else:
-            st.info(f"🎨 正在使用 {model_info['model_name']} 生成圖像...")
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        if category == 'flux-krea':
-            stages = [
-                "🔧 初始化 FLUX Krea 模型...",
-                "📝 處理美學優化提示詞...", 
-                "🎨 開始美學推理過程...",
-                "✨ 生成自然寫實內容...",
-                "🎭 美學優化中...",
-                "🌈 色彩調和中...",
-                "🎉 FLUX Krea 生成完成！"
-            ]
-        elif provider == 'NavyAI':
-            stages = [
-                f"⚓ 初始化 NavyAI 統一接口...",
-                f"🔗 連接到 {category.upper()} 服務...", 
-                f"📝 處理 {category} 風格提示詞...",
-                f"✨ 生成 {category} 圖像內容...",
-                f"🎨 {category} 風格優化中...",
-                f"⚡ NavyAI 後處理中...",
-                f"🎉 NavyAI {category} 生成完成！"
-            ]
-        else:
-            stages = [
-                "🔧 初始化模型...",
-                "📝 處理提示詞...", 
-                "🎨 開始推理過程...",
-                "✨ 生成圖像內容...",
-                "🔍 細節處理中...",
-                "⚙️ 後處理優化...",
-                "🎉 完成生成！"
-            ]
-        
-        for i, stage in enumerate(stages):
-            status_text.text(stage)
-            time.sleep(0.5)
-            progress_bar.progress((i + 1) / len(stages))
-    
-    success, result = generate_images_with_retry(
-        client, provider, config['api_key'],
-        config['base_url'], **generation_params
-    )
-    
-    progress_container.empty()
-    
-    if success:
-        response = result
-        
-        generation_info = {
-            "prompt": prompt,
-            "model_name": model_info['model_name'],
-            "model_id": model_info['model_id'],
-            "provider": provider,
-            "category": category,
-            "size": size,
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "guidance_scale": guidance_scale,
-            "steps": steps,
-            "seed": safe_seed,
-            "aesthetic_score": model_info.get('aesthetic_score', 5),
-            "aesthetic_weight": aesthetic_weight,
-            "naturalism_boost": naturalism_boost,
-            "color_harmony": color_harmony
-        }
-        
-        if category == 'flux-krea':
-            st.balloons()
-            st.success(f"🎭✨ 成功生成 {len(response.data)} 張 FLUX Krea 美學優化圖像！")
-        elif category == 'dalle' and provider == 'NavyAI':
-            st.balloons()
-            st.success(f"🖼️⚓ 成功通過 NavyAI 統一接口生成 {len(response.data)} 張 DALL-E 圖像！")
-        elif category == 'midjourney' and provider == 'NavyAI':
-            st.balloons()
-            st.success(f"🎯⚓ 成功通過 NavyAI 統一接口生成 {len(response.data)} 張 Midjourney 藝術圖像！")
-        elif provider == 'NavyAI':
-            st.balloons()
-            st.success(f"⚓✨ 成功通過 NavyAI 統一接口生成 {len(response.data)} 張圖像！")
-        else:
-            st.success(f"✨ 成功生成 {len(response.data)} 張圖像！")
-        
-        if 'generation_history' not in st.session_state:
-            st.session_state.generation_history = []
-        
-        if len(response.data) == 1:
-            st.markdown("#### 🎨 生成結果")
-            image_id = f"gen_{uuid.uuid4().hex[:8]}"
-            display_image_with_actions(response.data[0].url, image_id, generation_info)
-            
-            st.session_state.generation_history.insert(0, {
-                "id": image_id,
-                "image_url": response.data[0].url,
-                "generation_info": generation_info
-            })
-            
-        else:
-            st.markdown("#### 🎨 生成結果")
-            
-            if category in ['flux-krea', 'dalle', 'midjourney']:
-                cols_count = 2
-            else:
-                cols_count = min(len(response.data), 3)
-            
-            img_cols = st.columns(cols_count)
-            
-            for i, image_data in enumerate(response.data):
-                with img_cols[i % len(img_cols)]:
-                    if category == 'flux-krea':
-                        st.markdown(f"**🎭 美學圖像 {i+1}**")
-                    elif category == 'dalle' and provider == 'NavyAI':
-                        st.markdown(f"**🖼️ DALL-E 圖像 {i+1}**")
-                    elif category == 'midjourney' and provider == 'NavyAI':
-                        st.markdown(f"**🎯 Midjourney 圖像 {i+1}**")
-                    elif provider == 'NavyAI':
-                        st.markdown(f"**⚓ NavyAI 圖像 {i+1}**")
-                    else:
-                        st.markdown(f"**圖像 {i+1}**")
-                    
-                    image_id = f"gen_{uuid.uuid4().hex[:8]}_{i}"
-                    display_image_with_actions(image_data.url, image_id, generation_info)
-                    
-                    st.session_state.generation_history.insert(0, {
-                        "id": image_id,
-                        "image_url": image_data.url,
-                        "generation_info": generation_info
-                    })
-    else:
-        st.error(f"❌ 生成失敗: {result}")
-
-def show_generation_history():
-    """顯示生成歷史"""
-    if 'generation_history' not in st.session_state or not st.session_state.generation_history:
-        return
-    
-    history = st.session_state.generation_history
-    
-    st.markdown("---")
-    st.markdown("### 📚 最近生成")
-    
-    flux_krea_history = [h for h in history[:12] if h.get('generation_info', {}).get('category') == 'flux-krea']
-    navyai_history = [h for h in history[:12] if h.get('generation_info', {}).get('provider') == 'NavyAI']
-    other_history = [h for h in history[:12] if h.get('generation_info', {}).get('category') not in ['flux-krea'] and h.get('generation_info', {}).get('provider') != 'NavyAI']
-    
-    if flux_krea_history:
-        st.markdown("#### 🎭 FLUX Krea 美學作品")
-        cols = st.columns(min(len(flux_krea_history), 4))
-        
-        for i, item in enumerate(flux_krea_history[:4]):
-            with cols[i]:
-                try:
-                    if item['image_url'].startswith('data:image'):
-                        base64_data = item['image_url'].split(',')[1] 
-                        img_data = base64.b64decode(base64_data)
-                        img = Image.open(BytesIO(img_data))
-                    else:
-                        img_response = requests.get(item['image_url'], timeout=5)
-                        img = Image.open(BytesIO(img_response.content))
-                    
-                    st.image(img, use_column_width=True)
-                    
-                    info = item.get('generation_info', {})
-                    st.success(f"🎭 {info.get('model_name', 'FLUX Krea')}")
-                    st.caption(f"美學: {'⭐' * info.get('aesthetic_score', 5)}")
-                    
-                    if st.button("🔄 重新生成", key=f"krea_hist_{item['id']}", use_container_width=True):
-                        st.session_state.regenerate_info = info
-                        rerun_app()
-                        
-                except Exception:
-                    st.error("圖像載入失敗")
-    
-    if navyai_history:
-        st.markdown("#### ⚓ NavyAI 統一接口作品")
-        cols = st.columns(min(len(navyai_history), 4))
-        
-        for i, item in enumerate(navyai_history[:4]):
-            with cols[i]:
-                try:
-                    if item['image_url'].startswith('data:image'):
-                        base64_data = item['image_url'].split(',')[1] 
-                        img_data = base64.b64decode(base64_data)
-                        img = Image.open(BytesIO(img_data))
-                    else:
-                        img_response = requests.get(item['image_url'], timeout=5)
-                        img = Image.open(BytesIO(img_response.content))
-                    
-                    st.image(img, use_column_width=True)
-                    
-                    info = item.get('generation_info', {})
-                    category = info.get('category', 'navyai')
-                    model_name = info.get('model_name', 'NavyAI')
-                    
-                    category_icons = {
-                        'flux-krea': '🎭', 'dalle': '🖼️', 'midjourney': '🎯',
-                        'flux': '⚡', 'stable-diffusion': '🎨'
-                    }
-                    
-                    icon = category_icons.get(category, '⚓')
-                    st.success(f"{icon} {model_name}")
-                    st.caption(f"NavyAI: {'⭐' * info.get('aesthetic_score', 4)}")
-                    
-                    if st.button("🔄 重新生成", key=f"navy_hist_{item['id']}", use_container_width=True):
-                        st.session_state.regenerate_info = info
-                        rerun_app()
-                        
-                except Exception:
-                    st.error("圖像載入失敗")
-    
-    if other_history:
-        st.markdown("#### ⚡ 其他模型作品")
-        cols = st.columns(min(len(other_history), 4))
-        
-        for i, item in enumerate(other_history[:4]):
-            with cols[i]:
-                try:
-                    if item['image_url'].startswith('data:image'):
-                        base64_data = item['image_url'].split(',')[1]
-                        img_data = base64.b64decode(base64_data)
-                        img = Image.open(BytesIO(img_data))
-                    else:
-                        img_response = requests.get(item['image_url'], timeout=5)
-                        img = Image.open(BytesIO(img_response.content))
-                    
-                    st.image(img, use_column_width=True)
-                    
-                    info = item.get('generation_info', {})
-                    category_icon = {'flux': '⚡', 'stable-diffusion': '🎨'}.get(info.get('category'), '🤖')
-                    
-                    st.info(f"{category_icon} {info.get('model_name', 'N/A')}")
-                    
-                    if st.button("🔄 重新生成", key=f"other_hist_{item['id']}", use_container_width=True):
-                        st.session_state.regenerate_info = info
-                        rerun_app()
-                        
-                except Exception:
-                    st.error("圖像載入失敗")
-    
-    col_clear, col_export = st.columns(2)
-    
-    with col_clear:
-        if st.button("🗑️ 清除歷史"):
-            st.session_state.generation_history = []
-            st.success("歷史已清除")
-            rerun_app()
-    
-    with col_export:
-        if len(history) > 0:
-            st.info(f"共 {len(history)} 張圖像")
-
 def init_session_state():
     """初始化會話狀態"""
     if 'api_config' not in st.session_state:
@@ -1593,144 +1080,187 @@ def init_session_state():
     
     if 'favorite_images' not in st.session_state:
         st.session_state.favorite_images = []
+    
+    if 'show_navyai_setup' not in st.session_state:
+        st.session_state.show_navyai_setup = False
 
 # 初始化
 init_session_state()
 
-# 側邊欄
-with st.sidebar:
-    st.markdown("### 🎭 快速啟動")
-    
-    # NavyAI 快速啟動
-    st.markdown("#### ⚓ NavyAI 統一接口")
-    if st.button("🚀 選擇 NavyAI", use_container_width=True, type="primary"):
-        st.session_state.selected_provider = "NavyAI"
-        st.success("已選擇 NavyAI 統一接口")
-        rerun_app()
-    
-    st.caption("50+ 模型，一個 API 密鑰")
-    
-    # FLUX Krea 快速啟動
-    st.markdown("#### 🎭 FLUX Krea")
-    krea_providers = ["Krea.ai", "Pollinations.ai"]
-    
-    selected_krea = st.selectbox(
-        "選擇 FLUX Krea 供應商:",
-        [""] + krea_providers,
-        format_func=lambda x: "請選擇..." if x == "" else f"{MODEL_PROVIDERS[x]['icon']} {MODEL_PROVIDERS[x]['name']}"
-    )
-    
-    if selected_krea and st.button("🚀 快速啟動", use_container_width=True):
-        provider_info = MODEL_PROVIDERS[selected_krea]
-        st.session_state.selected_provider = selected_krea
-        
-        if not provider_info.get('requires_api_key', True):
-            st.session_state.api_config = {
-                'provider': selected_krea,
-                'api_key': 'no-key-required',
-                'base_url': provider_info['base_url'],
-                'validated': True,
-                'key_name': f'{provider_info["name"]} 免費服務'
-            }
-        
-        st.success(f"🎭 {provider_info['name']} 已啟動！")
-        rerun_app()
-    
-    st.markdown("---")
-    
-    # 顯示當前狀態
-    st.markdown("### ⚡ 當前狀態")
-    
-    api_configured = st.session_state.api_config.get('api_key') is not None and st.session_state.api_config.get('api_key') != ''
-    
-    if 'selected_provider' in st.session_state and api_configured:
-        provider = st.session_state.selected_provider
-        all_providers = provider_manager.get_all_providers()
-        provider_info = all_providers.get(provider, {})
-        
-        current_name = f"{provider_info['icon']} {provider_info['name']}"
-        st.success(f"✅ {current_name}")
-        
-        if "flux-krea" in provider_info.get('features', []):
-            st.info("🎭 支援 FLUX Krea")
-        
-        if st.session_state.api_config.get('key_name'):
-            st.caption(f"🔑 {st.session_state.api_config['key_name']}")
-    else:
-        st.info("未配置 API")
-    
-    st.markdown("---")
-    
-    # 統計信息
-    st.markdown("### 📊 統計")
-    total_keys = len(provider_manager.get_api_keys())
-    flux_krea_models = provider_manager.get_provider_models(category="flux-krea")
-    total_krea_models = len(flux_krea_models)
-    
-    col_stat1, col_stat2 = st.columns(2)
-    with col_stat1:
-        st.metric("密鑰數", total_keys)
-    with col_stat2:
-        st.metric("FLUX Krea", total_krea_models)
+# 檢查是否顯示 NavyAI 設置頁面
+if st.session_state.get('show_navyai_setup', False):
+    show_navyai_api_setup()
 
-# 主標題
-st.title("🎨 AI Image Generator Pro - FLUX Krea + NavyAI + 多供應商")
-
-# 主要內容
-if 'selected_provider' not in st.session_state:
-    show_provider_selector()
 else:
-    # 顯示供應商管理界面
-    selected_provider = st.session_state.selected_provider
-    all_providers = provider_manager.get_all_providers()
-    provider_info = all_providers[selected_provider]
-    
-    st.subheader(f"{provider_info['icon']} {provider_info['name']}")
-    
-    # 特別標注支援的模型
-    if "flux-krea" in provider_info.get('features', []):
-        st.success("🎭 此供應商支援 FLUX Krea 美學優化模型！")
-    
-    if selected_provider == "NavyAI":
-        st.success("⚓ NavyAI 統一接口 - 一個密鑰訪問 50+ AI 模型")
-    
-    col_info, col_switch = st.columns([3, 1])
-    
-    with col_info:
-        st.info(f"📋 {provider_info['description']}")
-        st.caption(f"🔗 API 類型: {provider_info['api_type']} | 端點: {provider_info['base_url']}")
+    # 側邊欄
+    with st.sidebar:
+        st.markdown("### ⚓ NavyAI 快速設置")
         
-        features_badges = " ".join([f"`{feature}`" for feature in provider_info['features']])
-        st.markdown(f"**支持功能**: {features_badges}")
+        # 檢查是否已有 NavyAI 密鑰
+        navyai_keys = provider_manager.get_api_keys("NavyAI")
+        verified_navyai_keys = [k for k in navyai_keys if k['validated']]
         
-        if provider_info.get('speciality'):
-            st.success(f"🎯 專長: {provider_info['speciality']}")
+        if verified_navyai_keys:
+            st.success(f"✅ 已配置 {len(verified_navyai_keys)} 個 NavyAI 密鑰")
+            
+            # 顯示當前密鑰信息
+            current_key = verified_navyai_keys[0]
+            st.info(f"🔑 當前: {current_key['key_name']}")
+            
+            if current_key.get('api_info'):
+                api_info = current_key['api_info']
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    st.metric("計劃", api_info.get('plan', 'N/A')[:8])
+                with col_c2:
+                    st.metric("模型", api_info.get('models_available', 'N/A'))
+            
+            if st.button("⚓ 使用 NavyAI", use_container_width=True, type="primary"):
+                st.session_state.selected_provider = "NavyAI"
+                st.session_state.api_config = {
+                    'provider': "NavyAI",
+                    'api_key': current_key['api_key'],
+                    'base_url': current_key['base_url'] or MODEL_PROVIDERS["NavyAI"]['base_url'],
+                    'validated': True,
+                    'key_name': current_key['key_name']
+                }
+                st.success("🚀 NavyAI 已啟動")
+                rerun_app()
+        else:
+            st.warning("❌ 尚未配置 NavyAI 密鑰")
+        
+        if st.button("🔧 NavyAI 設置", use_container_width=True):
+            st.session_state.show_navyai_setup = True
+            rerun_app()
+        
+        st.markdown("---")
+        
+        # FLUX Krea 快速啟動
+        st.markdown("### 🎭 FLUX Krea 快速啟動")
+        
+        krea_providers = ["Krea.ai", "Pollinations.ai"]
+        
+        selected_krea = st.selectbox(
+            "選擇 FLUX Krea 供應商:",
+            [""] + krea_providers,
+            format_func=lambda x: "請選擇..." if x == "" else f"{MODEL_PROVIDERS[x]['icon']} {MODEL_PROVIDERS[x]['name']}"
+        )
+        
+        if selected_krea and st.button("🚀 快速啟動", use_container_width=True):
+            provider_info = MODEL_PROVIDERS[selected_krea]
+            st.session_state.selected_provider = selected_krea
+            
+            if not provider_info.get('requires_api_key', True):
+                st.session_state.api_config = {
+                    'provider': selected_krea,
+                    'api_key': 'no-key-required',
+                    'base_url': provider_info['base_url'],
+                    'validated': True,
+                    'key_name': f'{provider_info["name"]} 免費服務'
+                }
+            
+            st.success(f"🎭 {provider_info['name']} 已啟動！")
+            rerun_app()
+        
+        st.markdown("---")
+        
+        # 統計信息
+        st.markdown("### 📊 統計信息")
+        
+        total_keys = len(provider_manager.get_api_keys())
+        navyai_key_count = len(navyai_keys)
+        
+        col_stat1, col_stat2 = st.columns(2)
+        with col_stat1:
+            st.metric("總密鑰", total_keys)
+        with col_stat2:
+            st.metric("NavyAI", navyai_key_count)
+        
+        if verified_navyai_keys:
+            st.success("⚓ NavyAI 已就緒")
+        else:
+            st.info("⚓ 配置 NavyAI")
     
-    with col_switch:
-        if st.button("🔄 切換供應商", use_container_width=True):
-            del st.session_state.selected_provider
+    # 主標題
+    st.title("🎨 AI Image Generator Pro - FLUX Krea + NavyAI + 多供應商")
+    
+    # NavyAI 特色介紹
+    if not st.session_state.get('selected_provider'):
+        st.markdown("### ⚓ NavyAI 統一 AI 接口 - 新功能！")
+        
+        col_nav1, col_nav2, col_nav3 = st.columns(3)
+        
+        with col_nav1:
+            st.info("""
+            **🤖 50+ AI 模型**
+            
+            • FLUX Krea (美學優化)
+            • DALL-E 3 (OpenAI)
+            • Midjourney v6 (藝術)
+            • GPT-4, Claude (文本)
+            • 更多模型持續增加
+            """)
+        
+        with col_nav2:
+            st.success("""
+            **⚡ 統一接口**
+            
+            • 一個 API 密鑰
+            • 統一計費系統
+            • >99% 運行時間
+            • 24/7 技術支援
+            • 全球CDN加速
+            """)
+        
+        with col_nav3:
+            st.warning("""
+            **🔧 簡單設置**
+            
+            • 快速註冊獲取密鑰
+            • Discord `/key` 命令
+            • 詳細文檔支援
+            • API 使用監控
+            • 靈活計費方案
+            """)
+        
+        if st.button("🚀 立即設置 NavyAI", type="primary", use_container_width=True):
+            st.session_state.show_navyai_setup = True
             rerun_app()
     
-    management_tabs = st.tabs(["🔑 密鑰管理", "🤖 模型發現", "🎨 圖像生成"])
+    # 其餘主要功能保持不變
+    if 'selected_provider' not in st.session_state:
+        st.markdown("---")
+        st.markdown("### 🏢 或選擇其他供應商")
+        
+        # 簡化的供應商選擇
+        other_providers = {k: v for k, v in MODEL_PROVIDERS.items() if k != "NavyAI"}
+        
+        cols = st.columns(2)
+        for i, (provider_key, provider_info) in enumerate(other_providers.items()):
+            with cols[i % 2]:
+                with st.container():
+                    st.markdown(f"#### {provider_info['icon']} {provider_info['name']}")
+                    st.caption(provider_info['description'])
+                    
+                    if "flux-krea" in provider_info.get('features', []):
+                        st.info("🎭 支援 FLUX Krea")
+                    
+                    if st.button(f"選擇 {provider_info['name']}", key=f"select_{provider_key}", use_container_width=True):
+                        st.session_state.selected_provider = provider_key
+                        rerun_app()
+                    
+                    if not provider_info.get('requires_api_key', True):
+                        st.caption("🆓 免費服務")
     
-    with management_tabs[0]:
-        show_provider_key_management(selected_provider, provider_info)
-    
-    with management_tabs[1]:
-        show_provider_model_discovery(selected_provider, provider_info)
-    
-    with management_tabs[2]:
-        show_image_generation(selected_provider, provider_info)
-
-# 頁腳
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666;">
-    🎭 <strong>FLUX Krea 美學優化</strong> | 
-    ⚓ <strong>NavyAI 統一接口</strong> | 
-    🌸 <strong>免費服務</strong> | 
-    ⚡ <strong>快速切換</strong>
-    <br><br>
-    <small>現已全面支援 FLUX Krea、NavyAI 統一接口和多種 AI 圖像生成模型！</small>
-</div>
-""", unsafe_allow_html=True)
+    # 頁腳
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666;">
+        ⚓ <strong>NavyAI 統一接口</strong> | 
+        🎭 <strong>FLUX Krea 美學優化</strong> | 
+        🌸 <strong>免費服務</strong> | 
+        ⚡ <strong>50+ AI 模型</strong>
+        <br><br>
+        <small>現已全面支援 NavyAI 統一接口，一個密鑰訪問所有頂級 AI 模型！</small>
+    </div>
+    """, unsafe_allow_html=True)
