@@ -2,8 +2,12 @@ import streamlit as st
 import os
 import logging
 import time
-from functools import lru_cache
 import sqlite3
+import uuid
+import json
+import random
+from functools import lru_cache
+from typing import Dict, List, Optional, Tuple  # 修復：正確導入類型註解
 
 # 必須是第一個 Streamlit 命令 - Koyeb 優化配置
 st.set_page_config(
@@ -35,10 +39,6 @@ def get_heavy_imports():
         from io import BytesIO
         import datetime
         import base64
-        from typing import Dict, List, Optional, Tuple
-        import random
-        import json
-        import uuid
         import re
         
         return {
@@ -50,9 +50,6 @@ def get_heavy_imports():
             'BytesIO': BytesIO,
             'datetime': datetime,
             'base64': base64,
-            'random': random,
-            'json': json,
-            'uuid': uuid,
             're': re
         }
     except ImportError as e:
@@ -103,7 +100,7 @@ class KoyebOptimizedProviderManager:
         self.init_database()
     
     @lru_cache(maxsize=100)
-    def get_cached_providers(self):
+    def get_cached_providers(self) -> Dict:
         """Koyeb 優化：快取供應商列表"""
         return MODEL_PROVIDERS.copy()
     
@@ -214,7 +211,7 @@ provider_manager = get_provider_manager()
 
 # Koyeb 優化的圖像生成函數
 @st.cache_data(ttl=300)  # 5分鐘快取 - Koyeb 性能優化
-def generate_pollinations_image_koyeb(prompt: str, model: str = "flux", size: str = "1024x1024") -> tuple:
+def generate_pollinations_image_koyeb(prompt: str, model: str = "flux", size: str = "1024x1024") -> Tuple[bool, str]:
     """Koyeb 優化的 Pollinations 圖像生成"""
     imports = get_heavy_imports()
     if not imports:
@@ -253,7 +250,7 @@ def generate_pollinations_image_koyeb(prompt: str, model: str = "flux", size: st
         return False, str(e)
 
 # Koyeb 優化的模擬生成
-def generate_demo_image_koyeb(prompt: str, provider: str = "Demo") -> tuple:
+def generate_demo_image_koyeb(prompt: str, provider: str = "Demo") -> Tuple[bool, str]:
     """Koyeb 冷啟動友好的演示圖像生成"""
     imports = get_heavy_imports()
     if not imports:
@@ -514,7 +511,7 @@ def generate_image_koyeb(provider: str, prompt: str, model: str, size: str):
 
 # 會話狀態初始化 - Koyeb 優化
 @st.cache_data
-def init_koyeb_session():
+def init_koyeb_session() -> Dict:
     """Koyeb 優化的會話初始化"""
     return {
         'providers_loaded': True,
@@ -618,15 +615,6 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-# 確保重要模組載入
-try:
-    import uuid
-    import random
-    import json
-    logger.info("核心模組載入成功")
-except ImportError as e:
-    logger.error(f"核心模組載入失敗: {e}")
 
 if __name__ == "__main__":
     main()
