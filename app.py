@@ -16,14 +16,20 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# 設置環境編碼
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 # Koyeb 環境檢測和優化設置
 KOYEB_ENV = os.getenv('KOYEB_PUBLIC_DOMAIN') is not None
 PORT = int(os.getenv('PORT', 8501))
 
-# 日誌配置 - Koyeb 優化
+# 日誌配置 - Koyeb 優化，避免 Unicode 錯誤
 logging.basicConfig(
     level=logging.INFO if KOYEB_ENV else logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -52,8 +58,60 @@ def get_heavy_imports():
             're': re
         }
     except ImportError as e:
-        logger.error(f"Failed to import heavy modules: {e}")
+        logger.error(f"Failed to import heavy modules: {str(e)}")
         return {}
+
+# 安全的文本處理函數 - 避免編碼錯誤
+def safe_text(text, max_length=None):
+    """安全處理文本，避免編碼錯誤"""
+    try:
+        if not isinstance(text, str):
+            text = str(text)
+        
+        # 移除或替換可能導致編碼問題的字符
+        text = text.encode('utf-8', errors='ignore').decode('utf-8')
+        
+        if max_length and len(text) > max_length:
+            text = text[:max_length] + "..."
+        
+        return text
+    except Exception as e:
+        logger.warning(f"Text encoding issue: {str(e)}")
+        return "Text encoding error"
+
+# 回到主頁功能
+def go_to_homepage():
+    """返回主頁並清除所有狀態"""
+    try:
+        # 清除選擇的供應商
+        if 'selected_provider' in st.session_state:
+            del st.session_state.selected_provider
+        
+        # 清除 NavyAI 設置頁面狀態
+        if 'show_navyai_setup' in st.session_state:
+            del st.session_state.show_navyai_setup
+        
+        # 清除 NavyAI 模型選擇
+        if 'selected_navyai_model' in st.session_state:
+            del st.session_state.selected_navyai_model
+        
+        if 'selected_navyai_category' in st.session_state:
+            del st.session_state.selected_navyai_category
+        
+        # 清除快速模板
+        if 'quick_template' in st.session_state:
+            del st.session_state.quick_template
+        
+        # 重新運行應用
+        rerun_app()
+    except Exception as e:
+        logger.error(f"Error in go_to_homepage: {str(e)}")
+        st.rerun()
+
+def show_home_button():
+    """顯示回到主頁按鈕 - 通用組件"""
+    if st.button("🏠 回到主頁", use_container_width=True, type="secondary"):
+        go_to_homepage()
 
 # Koyeb 兼容性函數
 def rerun_app():
@@ -344,10 +402,10 @@ class KoyebOptimizedProviderManager:
             
             conn.commit()
             conn.close()
-            logger.info("Koyeb 數據庫初始化完成")
+            logger.info("Koyeb database initialized successfully")
             
         except Exception as e:
-            logger.error(f"Koyeb 數據庫初始化失敗: {e}")
+            logger.error(f"Koyeb database initialization failed: {str(e)}")
     
     def save_api_key(self, provider, key_name, api_key):
         """Koyeb 優化的 API 密鑰保存"""
@@ -367,11 +425,11 @@ class KoyebOptimizedProviderManager:
             conn.commit()
             conn.close()
             
-            logger.info(f"Koyeb API 密鑰已保存: {provider}")
+            logger.info(f"Koyeb API key saved: {provider}")
             return key_id
             
         except Exception as e:
-            logger.error(f"Koyeb API 密鑰保存失敗: {e}")
+            logger.error(f"Koyeb API key save failed: {str(e)}")
             return ""
     
     def get_active_api_key(self, provider):
@@ -400,7 +458,7 @@ class KoyebOptimizedProviderManager:
             return None
             
         except Exception as e:
-            logger.error(f"Koyeb 密鑰獲取失敗: {e}")
+            logger.error(f"Koyeb key retrieval failed: {str(e)}")
             return None
 
 # 全局管理器實例
@@ -417,9 +475,12 @@ def generate_flux_krea_image(prompt, preset="realistic", size="1024x1024"):
     """FLUX Krea 專門優化的圖像生成"""
     imports = get_heavy_imports()
     if not imports:
-        return False, "模組載入失敗"
+        return False, "Module loading failed"
     
     try:
+        # 安全處理提示詞
+        prompt = safe_text(prompt, max_length=500)
+        
         # 應用 FLUX Krea 預設
         preset_config = FLUX_KREA_PRESETS.get(preset, FLUX_KREA_PRESETS["realistic"])
         
@@ -455,17 +516,22 @@ def generate_flux_krea_image(prompt, preset="realistic", size="1024x1024"):
             return False, f"HTTP {response.status_code}"
             
     except Exception as e:
-        logger.error(f"FLUX Krea 圖像生成錯誤: {e}")
-        return False, str(e)
+        error_msg = safe_text(str(e))
+        logger.error(f"FLUX Krea image generation error: {error_msg}")
+        return False, error_msg
 
-# NavyAI 模型選擇生成
+# NavyAI 模型選擇生成 - 修復編碼問題
 def generate_navyai_image(api_key, model_id, prompt, **params):
-    """NavyAI 多模型選擇生成（模擬實現）"""
+    """NavyAI 多模型選擇生成（模擬實現）- 修復編碼問題"""
     imports = get_heavy_imports()
     if not imports:
-        return False, "模組載入失敗"
+        return False, "Module loading failed"
     
     try:
+        # 安全處理所有文本參數
+        prompt = safe_text(prompt, max_length=500)
+        model_id = safe_text(model_id)
+        
         # 根據模型類別決定生成時間
         if "krea" in model_id.lower():
             time.sleep(4)  # FLUX Krea 需要更多美學處理時間
@@ -521,22 +587,27 @@ def generate_navyai_image(api_key, model_id, prompt, **params):
         except:
             font_large = font_small = None
         
-        # 模型特定標題
+        # 安全處理模型名稱 - 避免 Unicode 問題
         model_name = model_id.split('/')[-1] if '/' in model_id else model_id
-        draw.text((50, 50), f"⚓ NavyAI: {model_name}", fill=(255, 255, 255), font=font_large)
+        model_name = safe_text(model_name, max_length=30)
         
-        # 提示詞預覽
-        prompt_lines = [prompt[i:i+40] for i in range(0, min(len(prompt), 120), 40)]
+        # 使用安全的文本，避免 emoji 編碼問題
+        safe_title = f"NavyAI: {model_name}"
+        draw.text((50, 50), safe_title, fill=(255, 255, 255), font=font_large)
+        
+        # 提示詞預覽 - 安全處理
+        safe_prompt = safe_text(prompt, max_length=120)
+        prompt_lines = [safe_prompt[i:i+40] for i in range(0, len(safe_prompt), 40)]
         y_offset = 100
         for line in prompt_lines:
             draw.text((50, y_offset), line, fill=(255, 255, 255), font=font_small)
             y_offset += 25
         
-        # 模型信息
-        draw.text((50, height - 150), f"Model: {model_id}", fill=(255, 255, 255), font=font_small)
-        draw.text((50, height - 125), "⚓ NavyAI 統一接口", fill=(255, 255, 255), font=font_small)
-        draw.text((50, height - 100), "15+ 專業圖像模型", fill=(255, 255, 255), font=font_small)
-        draw.text((50, height - 75), f"Koyeb 高性能部署", fill=(255, 255, 255), font=font_small)
+        # 模型信息 - 使用安全文本
+        draw.text((50, height - 150), f"Model: {model_name}", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 125), "NavyAI Unified API", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 100), "15+ Professional Image Models", fill=(255, 255, 255), font=font_small)
+        draw.text((50, height - 75), "Koyeb High-Performance Deploy", fill=(255, 255, 255), font=font_small)
         
         # 轉換為 base64
         buffer = imports['BytesIO']()
@@ -546,8 +617,9 @@ def generate_navyai_image(api_key, model_id, prompt, **params):
         return True, f"data:image/png;base64,{encoded_image}"
         
     except Exception as e:
-        logger.error(f"NavyAI 圖像生成錯誤: {e}")
-        return False, str(e)
+        error_msg = safe_text(str(e))
+        logger.error(f"NavyAI image generation error: {error_msg}")
+        return False, error_msg
 
 # UI 組件
 def show_koyeb_header():
@@ -619,7 +691,12 @@ def show_koyeb_main_interface():
 
 def show_flux_krea_generator():
     """FLUX Krea 專門生成器"""
-    st.markdown("### 🎭 FLUX Krea AI - 美學優化圖像生成")
+    # 頁面頂部 - 回到主頁按鈕
+    col_home, col_title = st.columns([1, 4])
+    with col_home:
+        show_home_button()
+    with col_title:
+        st.markdown("### 🎭 FLUX Krea AI - 美學優化圖像生成")
     
     col_prompt, col_settings = st.columns([2, 1])
     
@@ -689,26 +766,41 @@ def show_flux_krea_generator():
     
     can_generate = prompt.strip()
     
-    if st.button(
-        f"🎭 FLUX Krea 美學生成",
-        type="primary", 
-        disabled=not can_generate,
-        use_container_width=True
-    ):
-        if can_generate:
-            generate_flux_krea_main(prompt, selected_preset, selected_size)
+    col_generate, col_back = st.columns([3, 1])
+    with col_generate:
+        if st.button(
+            f"🎭 FLUX Krea 美學生成",
+            type="primary", 
+            disabled=not can_generate,
+            use_container_width=True
+        ):
+            if can_generate:
+                generate_flux_krea_main(prompt, selected_preset, selected_size)
+    
+    with col_back:
+        show_home_button()
 
 def show_navyai_generator():
     """NavyAI 多模型生成器"""
+    # 頁面頂部 - 回到主頁按鈕
+    col_home, col_title = st.columns([1, 4])
+    with col_home:
+        show_home_button()
+    with col_title:
+        st.markdown("### ⚓ NavyAI - 多模型統一接口")
+    
     api_key_info = provider_manager.get_active_api_key("NavyAI")
     if not api_key_info:
         st.warning("⚠️ 請先配置 NavyAI API 密鑰")
-        if st.button("⚓ 前往設置", use_container_width=True):
-            st.session_state.show_navyai_setup = True
-            rerun_app()
+        col_setup, col_home_warn = st.columns([3, 1])
+        with col_setup:
+            if st.button("⚓ 前往設置", use_container_width=True):
+                st.session_state.show_navyai_setup = True
+                rerun_app()
+        with col_home_warn:
+            show_home_button()
         return
     
-    st.markdown("### ⚓ NavyAI - 多模型統一接口")
     st.success(f"🔑 使用密鑰: {api_key_info['key_name']}")
     
     # 模型選擇
@@ -774,7 +866,11 @@ def show_navyai_generator():
     
     if selected_model:
         st.markdown("---")
-        st.success(f"✅ 已選擇: {selected_model['name']} ({NAVYAI_MODELS[selected_category]['category_name']})")
+        col_selected, col_home_selected = st.columns([4, 1])
+        with col_selected:
+            st.success(f"✅ 已選擇: {selected_model['name']} ({NAVYAI_MODELS[selected_category]['category_name']})")
+        with col_home_selected:
+            show_home_button()
         
         # 生成界面
         col_prompt, col_params = st.columns([3, 1])
@@ -803,21 +899,34 @@ def show_navyai_generator():
         
         can_generate = prompt.strip() and selected_model
         
-        if st.button(
-            f"⚓ NavyAI 生成 ({selected_model['name']})",
-            type="primary",
-            disabled=not can_generate,
-            use_container_width=True
-        ):
-            if can_generate:
-                generate_navyai_main(
-                    api_key_info['api_key'], 
-                    selected_model, 
-                    selected_category,
-                    prompt, 
-                    selected_size, 
-                    num_images
-                )
+        col_generate, col_back = st.columns([3, 1])
+        with col_generate:
+            if st.button(
+                f"⚓ NavyAI 生成 ({selected_model['name']})",
+                type="primary",
+                disabled=not can_generate,
+                use_container_width=True
+            ):
+                if can_generate:
+                    generate_navyai_main(
+                        api_key_info['api_key'], 
+                        selected_model, 
+                        selected_category,
+                        prompt, 
+                        selected_size, 
+                        num_images
+                    )
+        
+        with col_back:
+            show_home_button()
+    else:
+        # 沒有選擇模型時顯示回到主頁按鈕
+        st.markdown("---")
+        col_prompt_select, col_home_noselect = st.columns([4, 1])
+        with col_prompt_select:
+            st.info("💡 請先選擇一個 AI 模型開始生成")
+        with col_home_noselect:
+            show_home_button()
 
 def generate_flux_krea_main(prompt, preset, size):
     """FLUX Krea 主生成流程"""
@@ -866,7 +975,7 @@ def generate_flux_krea_main(prompt, preset, size):
                 st.write(f"**色彩和諧**: {preset_config['color_harmony']}")
                 st.write(f"**優化提示詞**: {preset_config['prompt_prefix']}[您的提示詞]{preset_config['prompt_suffix']}")
             
-            col_download, col_regen = st.columns(2)
+            col_download, col_regen, col_home_result = st.columns([2, 2, 1])
             
             with col_download:
                 if st.button("📥 下載美學作品", use_container_width=True):
@@ -875,11 +984,19 @@ def generate_flux_krea_main(prompt, preset, size):
             with col_regen:
                 if st.button("🎭 重新美學生成", use_container_width=True):
                     generate_flux_krea_main(prompt, preset, size)
+            
+            with col_home_result:
+                show_home_button()
                     
         except Exception as e:
-            st.error(f"圖像顯示錯誤: {e}")
+            st.error(f"圖像顯示錯誤: {safe_text(str(e))}")
     else:
         st.error(f"❌ FLUX Krea 生成失敗: {result}")
+        
+        # 失敗時也顯示回到主頁
+        col_error, col_home_error = st.columns([4, 1])
+        with col_home_error:
+            show_home_button()
 
 def generate_navyai_main(api_key, model, category, prompt, size, num_images):
     """NavyAI 主生成流程"""
@@ -932,7 +1049,7 @@ def generate_navyai_main(api_key, model, category, prompt, size, num_images):
                 st.write(f"**生成速度**: {model['speed']}")
                 st.write(f"**質量等級**: {'⭐' * model['quality']}")
             
-            col_download, col_regen = st.columns(2)
+            col_download, col_regen, col_home_result = st.columns([2, 2, 1])
             
             with col_download:
                 if st.button("📥 下載 NavyAI 作品", use_container_width=True):
@@ -941,16 +1058,25 @@ def generate_navyai_main(api_key, model, category, prompt, size, num_images):
             with col_regen:
                 if st.button("⚓ 重新生成", use_container_width=True):
                     generate_navyai_main(api_key, model, category, prompt, size, num_images)
+            
+            with col_home_result:
+                show_home_button()
                     
         except Exception as e:
-            st.error(f"圖像顯示錯誤: {e}")
+            st.error(f"圖像顯示錯誤: {safe_text(str(e))}")
     else:
         st.error(f"❌ NavyAI 生成失敗: {result}")
+        
+        # 失敗時也顯示回到主頁
+        col_error, col_home_error = st.columns([4, 1])
+        with col_home_error:
+            show_home_button()
 
 def show_koyeb_image_generator():
     """Koyeb 優化的圖像生成器路由"""
     if 'selected_provider' not in st.session_state:
         st.warning("⚠️ 請先選擇一個服務提供商")
+        show_home_button()
         return
     
     provider = st.session_state.selected_provider
@@ -968,7 +1094,8 @@ def init_koyeb_session():
         'koyeb_optimized': True,
         'cold_start_ready': True,
         'flux_krea_optimized': True,
-        'navyai_models_loaded': True
+        'navyai_models_loaded': True,
+        'encoding_fixed': True
     }
 
 def init_session_state():
@@ -987,7 +1114,12 @@ def init_session_state():
 
 def show_koyeb_navyai_setup():
     """Koyeb 優化的 NavyAI 設置"""
-    st.markdown("### ⚓ NavyAI 多模型設置 - Koyeb 優化")
+    # 頁面頂部 - 回到主頁按鈕
+    col_home, col_title = st.columns([1, 4])
+    with col_home:
+        show_home_button()
+    with col_title:
+        st.markdown("### ⚓ NavyAI 多模型設置 - Koyeb 優化")
     
     with st.form("koyeb_navyai_form"):
         st.info("🚀 配置 NavyAI 統一接口以訪問 15+ 專業圖像模型")
@@ -1017,7 +1149,12 @@ def show_koyeb_navyai_setup():
             st.caption("🎨 Stable Diffusion (3 種)")
             st.caption("📊 **總計 15+ 模型**")
         
-        submitted = st.form_submit_button("💾 保存並啟用多模型", type="primary", use_container_width=True)
+        col_submit, col_home_form = st.columns([3, 1])
+        with col_submit:
+            submitted = st.form_submit_button("💾 保存並啟用多模型", type="primary", use_container_width=True)
+        with col_home_form:
+            if st.form_submit_button("🏠 返回主頁", use_container_width=True):
+                go_to_homepage()
         
         if submitted and api_key:
             key_id = provider_manager.save_api_key("NavyAI", key_name, api_key)
@@ -1030,44 +1167,45 @@ def show_koyeb_navyai_setup():
                 rerun_app()
             else:
                 st.error("❌ 密鑰保存失敗")
-    
-    if st.button("🏠 返回主頁", use_container_width=True):
-        st.session_state.show_navyai_setup = False
-        rerun_app()
 
 def main():
     """Koyeb 優化的主程式"""
-    init_session_state()
-    
-    if KOYEB_ENV:
-        st.success("🚀 應用正在 Koyeb 高性能平台運行")
-    
-    show_koyeb_header()
-    show_koyeb_status()
-    
-    st.markdown("---")
-    
-    if st.session_state.get('show_navyai_setup', False):
-        show_koyeb_navyai_setup()
-    elif 'selected_provider' in st.session_state:
-        show_koyeb_image_generator()
-    else:
-        show_koyeb_main_interface()
-    
-    st.markdown("---")
-    st.markdown(f"""
-    <div style="text-align: center; color: #666; padding: 1rem;">
-        <h4>🚀 Koyeb 高性能無服務器部署</h4>
-        <p><strong>🎭 FLUX Krea 美學專家</strong> | <strong>⚓ NavyAI 多模型統一</strong> | <strong>🌍 Global CDN</strong></p>
-        <div style="margin-top: 0.5rem;">
-            <small>
-                運行環境: {'🌍 Koyeb Production' if KOYEB_ENV else '💻 Local Development'} | 
-                端口: {PORT} | 
-                版本: FLUX Krea + NavyAI Models v3.0
-            </small>
+    try:
+        init_session_state()
+        
+        if KOYEB_ENV:
+            st.success("🚀 應用正在 Koyeb 高性能平台運行")
+        
+        show_koyeb_header()
+        show_koyeb_status()
+        
+        st.markdown("---")
+        
+        if st.session_state.get('show_navyai_setup', False):
+            show_koyeb_navyai_setup()
+        elif 'selected_provider' in st.session_state:
+            show_koyeb_image_generator()
+        else:
+            show_koyeb_main_interface()
+        
+        st.markdown("---")
+        st.markdown(f"""
+        <div style="text-align: center; color: #666; padding: 1rem;">
+            <h4>🚀 Koyeb 高性能無服務器部署</h4>
+            <p><strong>🎭 FLUX Krea 美學專家</strong> | <strong>⚓ NavyAI 多模型統一</strong> | <strong>🌍 Global CDN</strong></p>
+            <div style="margin-top: 0.5rem;">
+                <small>
+                    運行環境: {'🌍 Koyeb Production' if KOYEB_ENV else '💻 Local Development'} | 
+                    端口: {PORT} | 
+                    版本: FLUX Krea + NavyAI Models v3.1 (Encoding Fixed)
+                </small>
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    
+    except Exception as e:
+        st.error(f"應用運行錯誤: {safe_text(str(e))}")
+        logger.error(f"Main app error: {str(e)}")
 
 if __name__ == "__main__":
     main()
