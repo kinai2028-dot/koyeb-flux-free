@@ -98,6 +98,10 @@ def go_to_homepage():
         if 'selected_navyai_category' in st.session_state:
             del st.session_state.selected_navyai_category
         
+        # 清除 FLUX Krea 模型選擇
+        if 'selected_flux_krea_model' in st.session_state:
+            del st.session_state.selected_flux_krea_model
+        
         # 清除快速模板
         if 'quick_template' in st.session_state:
             del st.session_state.quick_template
@@ -122,6 +126,88 @@ def rerun_app():
         st.experimental_rerun()
     else:
         st.stop()
+
+# FLUX Krea 專門模型庫
+FLUX_KREA_MODELS = {
+    "flux-krea-dev": {
+        "name": "FLUX Krea Dev",
+        "model_id": "flux-krea",
+        "description": "美學優化開發版，平衡質量與速度，最受歡迎",
+        "pricing": "免費",
+        "speed": "~6-8s",
+        "quality": 5,
+        "aesthetic_score": 5,
+        "recommended": True,
+        "speciality": "平衡性能",
+        "best_for": ["人像攝影", "風景攝影", "日常創作"],
+        "icon": "🎭"
+    },
+    "flux-krea-pro": {
+        "name": "FLUX Krea Pro",
+        "model_id": "flux-krea-pro",
+        "description": "專業級美學優化，最高質量輸出，適合專業創作",
+        "pricing": "免費",
+        "speed": "~8-10s",
+        "quality": 5,
+        "aesthetic_score": 5,
+        "recommended": True,
+        "speciality": "最高質量",
+        "best_for": ["專業攝影", "商業創作", "藝術作品"],
+        "icon": "👑"
+    },
+    "flux-krea-schnell": {
+        "name": "FLUX Krea Schnell",
+        "model_id": "flux-krea-schnell", 
+        "description": "快速版本，保持美學質量同時提升生成速度",
+        "pricing": "免費",
+        "speed": "~3-5s",
+        "quality": 4,
+        "aesthetic_score": 4,
+        "recommended": False,
+        "speciality": "極速生成",
+        "best_for": ["快速原型", "批量生成", "測試創意"],
+        "icon": "⚡"
+    },
+    "flux-krea-realism": {
+        "name": "FLUX Krea Realism",
+        "model_id": "flux-realism",
+        "description": "專注寫實風格，適合需要高度真實感的圖像",
+        "pricing": "免費",
+        "speed": "~7-9s",
+        "quality": 5,
+        "aesthetic_score": 4,
+        "recommended": False,
+        "speciality": "寫實專精",
+        "best_for": ["寫實人像", "產品攝影", "紀錄風格"],
+        "icon": "📸"
+    },
+    "flux-krea-anime": {
+        "name": "FLUX Krea Anime",
+        "model_id": "flux-anime",
+        "description": "動漫風格優化，專門生成動漫插畫風格圖像",
+        "pricing": "免費",
+        "speed": "~6-8s",
+        "quality": 4,
+        "aesthetic_score": 5,
+        "recommended": False,
+        "speciality": "動漫風格",
+        "best_for": ["動漫角色", "插畫創作", "二次元風格"],
+        "icon": "🎌"
+    },
+    "flux-krea-artistic": {
+        "name": "FLUX Krea Artistic",
+        "model_id": "flux-artistic",
+        "description": "藝術創作優化，強化創意表現和藝術風格",
+        "pricing": "免費",
+        "speed": "~8-10s",
+        "quality": 5,
+        "aesthetic_score": 5,
+        "recommended": False,
+        "speciality": "藝術創作",
+        "best_for": ["抽象藝術", "創意設計", "概念藝術"],
+        "icon": "🎨"
+    }
+}
 
 # NavyAI 模型配置 - 完整模型庫
 NAVYAI_MODELS = {
@@ -333,14 +419,14 @@ MODEL_PROVIDERS = {
     "FLUX Krea AI": {
         "name": "FLUX Krea AI",
         "icon": "🎭",
-        "description": "FLUX Krea 專門優化 - 美學圖像生成專家",
+        "description": "FLUX Krea 專門優化 - 6種模型選擇，美學圖像生成專家",
         "api_type": "pollinations",
         "base_url": "https://image.pollinations.ai/prompt",
         "features": ["flux-krea"],
         "koyeb_optimized": True,
         "requires_api_key": False,
         "cold_start_friendly": True,
-        "speciality": "美學優化專家"
+        "speciality": "美學優化專家 + 多模型選擇"
     },
     "NavyAI": {
         "name": "NavyAI",
@@ -469,10 +555,10 @@ def get_provider_manager():
 
 provider_manager = get_provider_manager()
 
-# FLUX Krea 專門優化生成
+# FLUX Krea 專門優化生成 - 支援模型選擇
 @st.cache_data(ttl=300)
-def generate_flux_krea_image(prompt, preset="realistic", size="1024x1024"):
-    """FLUX Krea 專門優化的圖像生成"""
+def generate_flux_krea_image(prompt, model_id="flux-krea", preset="realistic", size="1024x1024"):
+    """FLUX Krea 專門優化的圖像生成 - 支援模型選擇"""
     imports = get_heavy_imports()
     if not imports:
         return False, "Module loading failed"
@@ -492,9 +578,9 @@ def generate_flux_krea_image(prompt, preset="realistic", size="1024x1024"):
         
         width, height = map(int, size.split('x'))
         
-        # FLUX Krea 專門參數
+        # FLUX Krea 專門參數 - 使用選擇的模型
         url_params = [
-            "model=flux-krea",  # 強制使用 FLUX Krea
+            f"model={model_id}",  # 使用選擇的模型
             f"width={width}",
             f"height={height}",
             "nologo=true",
@@ -627,10 +713,10 @@ def show_koyeb_header():
     st.markdown("""
     <div style="text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #60a5fa 100%); border-radius: 10px; margin-bottom: 1.5rem;">
         <h1 style="color: white; margin: 0; font-size: 2.2rem;">🎨 AI 圖像生成器 Pro</h1>
-        <h2 style="color: #dbeafe; margin: 0.3rem 0; font-size: 1.1rem;">FLUX Krea 專業優化 + NavyAI 多模型選擇</h2>
+        <h2 style="color: #dbeafe; margin: 0.3rem 0; font-size: 1.1rem;">FLUX Krea 6種模型 + NavyAI 15+ 模型選擇</h2>
         <div style="margin-top: 0.8rem;">
-            <span style="background: rgba(255,255,255,0.2); padding: 0.2rem 0.6rem; border-radius: 15px; margin: 0.1rem; color: #fef3c7; font-size: 0.9rem;">🎭 FLUX Krea</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 0.2rem 0.6rem; border-radius: 15px; margin: 0.1rem; color: #fef3c7; font-size: 0.9rem;">⚓ NavyAI Models</span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.2rem 0.6rem; border-radius: 15px; margin: 0.1rem; color: #fef3c7; font-size: 0.9rem;">🎭 FLUX Krea 6 Models</span>
+            <span style="background: rgba(255,255,255,0.2); padding: 0.2rem 0.6rem; border-radius: 15px; margin: 0.1rem; color: #fef3c7; font-size: 0.9rem;">⚓ NavyAI 15+ Models</span>
             <span style="background: rgba(255,255,255,0.2); padding: 0.2rem 0.6rem; border-radius: 15px; margin: 0.1rem; color: #fef3c7; font-size: 0.9rem;">🚀 Koyeb</span>
         </div>
     </div>
@@ -662,9 +748,9 @@ def show_koyeb_main_interface():
     
     with col_provider1:
         st.markdown("""
-        #### 🎭 FLUX Krea AI (美學專家)
-        - ✅ **專業美學優化**
-        - 🎨 自然寫實風格
+        #### 🎭 FLUX Krea AI (6種模型選擇)
+        - ✅ **6種 FLUX Krea 模型**
+        - 🎨 Dev, Pro, Schnell, Realism, Anime, Artistic
         - ⚡ 多種預設模式
         - 🆓 完全免費使用
         - 🚀 Koyeb 冷啟動優化
@@ -672,12 +758,12 @@ def show_koyeb_main_interface():
         
         if st.button("🎭 使用 FLUX Krea", type="primary", use_container_width=True):
             st.session_state.selected_provider = "FLUX Krea AI"
-            st.success("✅ FLUX Krea AI 已啟動 - 美學優化模式")
+            st.success("✅ FLUX Krea AI 已啟動 - 6種模型選擇")
             rerun_app()
     
     with col_provider2:
         st.markdown("""
-        #### ⚓ NavyAI (多模型統一)  
+        #### ⚓ NavyAI (15+ 多模型統一)  
         - 🎨 **15+ 專業圖像模型**
         - 🖼️ DALL-E 3、Midjourney
         - ⚡ FLUX AI、Stable Diffusion
@@ -690,95 +776,184 @@ def show_koyeb_main_interface():
             rerun_app()
 
 def show_flux_krea_generator():
-    """FLUX Krea 專門生成器"""
+    """FLUX Krea 專門生成器 - 加入模型選擇"""
     # 頁面頂部 - 回到主頁按鈕
     col_home, col_title = st.columns([1, 4])
     with col_home:
         show_home_button()
     with col_title:
-        st.markdown("### 🎭 FLUX Krea AI - 美學優化圖像生成")
+        st.markdown("### 🎭 FLUX Krea AI - 6種模型美學生成")
     
-    col_prompt, col_settings = st.columns([2, 1])
+    # FLUX Krea 模型選擇
+    st.markdown("#### 🤖 選擇 FLUX Krea 模型")
     
-    with col_prompt:
-        prompt = st.text_area(
-            "✍️ 描述您想要的圖像:",
-            height=120,
-            placeholder="例如：A beautiful woman with natural lighting and realistic skin",
-            help="FLUX Krea 專注美學優化，描述越詳細效果越好"
-        )
-        
-        # FLUX Krea 專門模板
-        st.markdown("#### 🎨 FLUX Krea 美學模板")
-        
-        krea_templates = [
-            "A professional headshot of a confident businesswoman, natural lighting, realistic skin texture",
-            "Beautiful landscape at golden hour, natural colors, peaceful atmosphere, high detail",
-            "Street photography of an elderly artist, authentic expression, warm lighting, candid moment",
-            "Interior design of a cozy coffee shop, natural lighting, authentic atmosphere, detailed textures"
-        ]
-        
-        template_cols = st.columns(2)
-        for i, template in enumerate(krea_templates):
-            with template_cols[i % 2]:
-                if st.button(f"🎭 {template[:35]}...", key=f"krea_template_{i}", use_container_width=True):
-                    st.session_state.quick_template = template
-                    rerun_app()
+    # 推薦模型
+    st.markdown("##### ⭐ 推薦模型")
+    recommended_models = {k: v for k, v in FLUX_KREA_MODELS.items() if v['recommended']}
     
-    with col_settings:
-        st.markdown("#### 🎯 美學預設")
-        
-        preset_options = list(FLUX_KREA_PRESETS.keys())
-        preset_names = [FLUX_KREA_PRESETS[p]["name"] for p in preset_options]
-        
-        selected_preset_idx = st.selectbox(
-            "選擇美學風格:",
-            range(len(preset_names)),
-            format_func=lambda x: preset_names[x],
-            index=0
-        )
-        selected_preset = preset_options[selected_preset_idx]
-        
-        # 顯示預設詳情
-        preset_config = FLUX_KREA_PRESETS[selected_preset]
-        st.info(f"**美學指導**: {preset_config['guidance_scale']}")
-        st.info(f"**美學權重**: {preset_config['aesthetic_weight']}")
-        st.info(f"**色彩和諧**: {preset_config['color_harmony']}")
-        
-        st.markdown("#### 🖼️ 生成參數")
-        size_options = ["512x512", "768x768", "1024x1024", "1152x896", "896x1152"]
-        selected_size = st.selectbox("圖像尺寸:", size_options, index=2)
-        
-        # FLUX Krea 特性
-        st.success("🎭 **FLUX Krea 特性**")
-        st.caption("• 美學優化算法")
-        st.caption("• 自然色彩調和")
-        st.caption("• 寫實細節增強")
-        st.caption("• 人像專業優化")
+    cols_rec = st.columns(len(recommended_models))
+    selected_model = None
     
-    # 檢查快速模板
-    if hasattr(st.session_state, 'quick_template'):
-        prompt = st.session_state.quick_template
-        del st.session_state.quick_template
-        rerun_app()
+    for i, (model_key, model_info) in enumerate(recommended_models.items()):
+        with cols_rec[i]:
+            if st.button(
+                f"{model_info['icon']} {model_info['name']}",
+                key=f"rec_flux_{model_key}",
+                use_container_width=True,
+                type="primary"
+            ):
+                selected_model = model_info
+                st.session_state.selected_flux_krea_model = model_info
+            
+            st.caption(model_info['description'])
+            st.caption(f"⚡ {model_info['speed']} | {'⭐' * model_info['quality']}")
+            st.caption(f"🎯 {model_info['speciality']}")
     
-    st.markdown("---")
+    # 其他模型
+    st.markdown("##### 📋 其他專業模型")
+    other_models = {k: v for k, v in FLUX_KREA_MODELS.items() if not v['recommended']}
     
-    can_generate = prompt.strip()
+    for model_key, model_info in other_models.items():
+        col_model, col_btn = st.columns([3, 1])
+        
+        with col_model:
+            st.write(f"{model_info['icon']} **{model_info['name']}**")
+            st.caption(model_info['description'])
+            st.caption(f"⚡ {model_info['speed']} | {'⭐' * model_info['quality']} | 🎯 {model_info['speciality']}")
+            st.caption(f"最適合: {', '.join(model_info['best_for'])}")
+        
+        with col_btn:
+            if st.button("選擇", key=f"sel_flux_{model_key}", use_container_width=True):
+                selected_model = model_info
+                st.session_state.selected_flux_krea_model = model_info
     
-    col_generate, col_back = st.columns([3, 1])
-    with col_generate:
-        if st.button(
-            f"🎭 FLUX Krea 美學生成",
-            type="primary", 
-            disabled=not can_generate,
-            use_container_width=True
-        ):
-            if can_generate:
-                generate_flux_krea_main(prompt, selected_preset, selected_size)
+    # 檢查會話中的選擇
+    if hasattr(st.session_state, 'selected_flux_krea_model'):
+        selected_model = st.session_state.selected_flux_krea_model
     
-    with col_back:
-        show_home_button()
+    if selected_model:
+        st.markdown("---")
+        col_selected, col_home_selected = st.columns([4, 1])
+        with col_selected:
+            st.success(f"✅ 已選擇: {selected_model['icon']} {selected_model['name']} - {selected_model['speciality']}")
+        with col_home_selected:
+            show_home_button()
+        
+        # 生成界面
+        col_prompt, col_settings = st.columns([2, 1])
+        
+        with col_prompt:
+            prompt = st.text_area(
+                "✍️ 描述您想要的圖像:",
+                height=120,
+                placeholder=f"針對 {selected_model['name']} 優化您的提示詞...",
+                help=f"{selected_model['name']} - {selected_model['description']}"
+            )
+            
+            # 模型專用模板
+            st.markdown(f"#### {selected_model['icon']} {selected_model['name']} 專用模板")
+            
+            # 根據模型類型提供不同模板
+            if "realism" in selected_model['model_id']:
+                templates = [
+                    "A professional business headshot, natural lighting, realistic skin texture",
+                    "Product photography on white background, commercial lighting, high detail",
+                    "Street photography documentary style, authentic moment, natural colors",
+                    "Interior architecture photography, realistic lighting, detailed textures"
+                ]
+            elif "anime" in selected_model['model_id']:
+                templates = [
+                    "Anime girl character with long flowing hair, detailed eyes, vibrant colors",
+                    "Fantasy anime warrior in magical forest, dynamic pose, epic lighting",
+                    "Cute anime mascot character, chibi style, pastel colors, kawaii",
+                    "Anime landscape with cherry blossoms, dreamy atmosphere, soft lighting"
+                ]
+            elif "artistic" in selected_model['model_id']:
+                templates = [
+                    "Abstract expressionist painting, bold brushstrokes, vibrant color palette",
+                    "Surreal dreamscape with floating objects, creative composition, artistic style",
+                    "Digital art concept design, futuristic elements, creative lighting",
+                    "Contemporary art installation, conceptual design, artistic interpretation"
+                ]
+            else:
+                templates = [
+                    "Professional portrait with natural lighting and realistic skin texture",
+                    "Beautiful landscape at golden hour, natural colors, peaceful atmosphere",
+                    "Modern architectural interior, clean design, natural lighting",
+                    "Street photography candid moment, authentic expression, urban setting"
+                ]
+            
+            template_cols = st.columns(2)
+            for i, template in enumerate(templates):
+                with template_cols[i % 2]:
+                    if st.button(f"{selected_model['icon']} {template[:35]}...", key=f"flux_template_{i}", use_container_width=True):
+                        st.session_state.quick_template = template
+                        rerun_app()
+        
+        with col_settings:
+            st.markdown("#### 🎯 美學預設")
+            
+            preset_options = list(FLUX_KREA_PRESETS.keys())
+            preset_names = [FLUX_KREA_PRESETS[p]["name"] for p in preset_options]
+            
+            selected_preset_idx = st.selectbox(
+                "選擇美學風格:",
+                range(len(preset_names)),
+                format_func=lambda x: preset_names[x],
+                index=0
+            )
+            selected_preset = preset_options[selected_preset_idx]
+            
+            # 顯示預設詳情
+            preset_config = FLUX_KREA_PRESETS[selected_preset]
+            st.info(f"**美學指導**: {preset_config['guidance_scale']}")
+            st.info(f"**美學權重**: {preset_config['aesthetic_weight']}")
+            st.info(f"**色彩和諧**: {preset_config['color_harmony']}")
+            
+            st.markdown("#### 🖼️ 生成參數")
+            size_options = ["512x512", "768x768", "1024x1024", "1152x896", "896x1152"]
+            selected_size = st.selectbox("圖像尺寸:", size_options, index=2)
+            
+            # 當前模型特性
+            st.success(f"{selected_model['icon']} **{selected_model['name']} 特性**")
+            st.caption(f"• {selected_model['speciality']}")
+            st.caption(f"• 質量等級: {'⭐' * selected_model['quality']}")
+            st.caption(f"• 美學分數: {'✨' * selected_model['aesthetic_score']}")
+            st.caption(f"• 生成速度: {selected_model['speed']}")
+            
+            st.info(f"**最適合**: {', '.join(selected_model['best_for'])}")
+        
+        # 檢查快速模板
+        if hasattr(st.session_state, 'quick_template'):
+            prompt = st.session_state.quick_template
+            del st.session_state.quick_template
+            rerun_app()
+        
+        st.markdown("---")
+        
+        can_generate = prompt.strip() and selected_model
+        
+        col_generate, col_back = st.columns([3, 1])
+        with col_generate:
+            if st.button(
+                f"{selected_model['icon']} FLUX Krea 生成 ({selected_model['name']})",
+                type="primary", 
+                disabled=not can_generate,
+                use_container_width=True
+            ):
+                if can_generate:
+                    generate_flux_krea_main(selected_model, prompt, selected_preset, selected_size)
+        
+        with col_back:
+            show_home_button()
+    else:
+        # 沒有選擇模型時
+        st.markdown("---")
+        col_prompt_select, col_home_noselect = st.columns([4, 1])
+        with col_prompt_select:
+            st.info("💡 請先選擇一個 FLUX Krea 模型開始生成")
+        with col_home_noselect:
+            show_home_button()
 
 def show_navyai_generator():
     """NavyAI 多模型生成器"""
@@ -787,7 +962,7 @@ def show_navyai_generator():
     with col_home:
         show_home_button()
     with col_title:
-        st.markdown("### ⚓ NavyAI - 多模型統一接口")
+        st.markdown("### ⚓ NavyAI - 15+ 模型統一接口")
     
     api_key_info = provider_manager.get_active_api_key("NavyAI")
     if not api_key_info:
@@ -804,7 +979,7 @@ def show_navyai_generator():
     st.success(f"🔑 使用密鑰: {api_key_info['key_name']}")
     
     # 模型選擇
-    st.markdown("#### 🤖 選擇 AI 模型")
+    st.markdown("#### 🤖 選擇 NavyAI 模型")
     
     # 創建模型分類標籤
     category_tabs = st.tabs(list(NAVYAI_MODELS.keys()))
@@ -924,28 +1099,28 @@ def show_navyai_generator():
         st.markdown("---")
         col_prompt_select, col_home_noselect = st.columns([4, 1])
         with col_prompt_select:
-            st.info("💡 請先選擇一個 AI 模型開始生成")
+            st.info("💡 請先選擇一個 NavyAI 模型開始生成")
         with col_home_noselect:
             show_home_button()
 
-def generate_flux_krea_main(prompt, preset, size):
-    """FLUX Krea 主生成流程"""
+def generate_flux_krea_main(selected_model, prompt, preset, size):
+    """FLUX Krea 主生成流程 - 支援模型選擇"""
     progress_container = st.empty()
     
     with progress_container.container():
-        st.info("🎭 FLUX Krea 美學優化生成中...")
+        st.info(f"{selected_model['icon']} {selected_model['name']} 美學優化生成中...")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         stages = [
-            "🎨 初始化 FLUX Krea 美學引擎...",
-            "✨ 應用美學優化預設...",
-            "🖼️ 處理美學提示詞...",
-            "🌈 生成色彩和諧方案...",
-            "🎭 美學細節優化中...",
-            "📸 自然寫實渲染中...",
-            "🎉 FLUX Krea 美學生成完成！"
+            f"{selected_model['icon']} 初始化 {selected_model['name']} 引擎...",
+            f"✨ 應用 {selected_model['speciality']} 優化...",
+            f"🖼️ 處理美學提示詞...",
+            f"🌈 生成色彩和諧方案...",
+            f"{selected_model['icon']} {selected_model['speciality']} 處理中...",
+            f"📸 {selected_model['name']} 渲染中...",
+            f"🎉 {selected_model['name']} 生成完成！"
         ]
         
         for i, stage in enumerate(stages):
@@ -953,37 +1128,48 @@ def generate_flux_krea_main(prompt, preset, size):
             time.sleep(0.5)
             progress_bar.progress((i + 1) / len(stages))
     
-    success, result = generate_flux_krea_image(prompt, preset, size)
+    success, result = generate_flux_krea_image(prompt, selected_model['model_id'], preset, size)
     
     progress_container.empty()
     
     if success:
-        st.success(f"🎭✨ FLUX Krea 美學優化完成！")
+        st.success(f"{selected_model['icon']}✨ {selected_model['name']} 生成完成！")
         st.balloons()
         
-        st.markdown("#### 🎨 FLUX Krea 美學作品")
+        st.markdown(f"#### 🎨 {selected_model['name']} 作品")
         
         try:
-            st.image(result, use_column_width=True, caption=f"FLUX Krea 美學風格: {FLUX_KREA_PRESETS[preset]['name']}")
+            st.image(result, use_column_width=True, caption=f"{selected_model['name']} - {selected_model['speciality']} | 預設: {FLUX_KREA_PRESETS[preset]['name']}")
             
-            # 美學分析
-            with st.expander("🎭 FLUX Krea 美學分析"):
-                preset_config = FLUX_KREA_PRESETS[preset]
-                st.write(f"**美學預設**: {preset_config['name']}")
-                st.write(f"**美學指導強度**: {preset_config['guidance_scale']}")
-                st.write(f"**美學權重**: {preset_config['aesthetic_weight']}")
-                st.write(f"**色彩和諧**: {preset_config['color_harmony']}")
-                st.write(f"**優化提示詞**: {preset_config['prompt_prefix']}[您的提示詞]{preset_config['prompt_suffix']}")
+            # 模型分析
+            with st.expander(f"{selected_model['icon']} {selected_model['name']} 詳細分析"):
+                col_model, col_preset = st.columns(2)
+                
+                with col_model:
+                    st.write(f"**模型名稱**: {selected_model['name']}")
+                    st.write(f"**模型專長**: {selected_model['speciality']}")
+                    st.write(f"**生成速度**: {selected_model['speed']}")
+                    st.write(f"**質量等級**: {'⭐' * selected_model['quality']}")
+                    st.write(f"**美學分數**: {'✨' * selected_model['aesthetic_score']}")
+                    st.write(f"**最適合**: {', '.join(selected_model['best_for'])}")
+                
+                with col_preset:
+                    preset_config = FLUX_KREA_PRESETS[preset]
+                    st.write(f"**美學預設**: {preset_config['name']}")
+                    st.write(f"**美學指導強度**: {preset_config['guidance_scale']}")
+                    st.write(f"**美學權重**: {preset_config['aesthetic_weight']}")
+                    st.write(f"**色彩和諧**: {preset_config['color_harmony']}")
+                    st.write(f"**優化提示詞**: {preset_config['prompt_prefix']}[您的提示詞]{preset_config['prompt_suffix']}")
             
             col_download, col_regen, col_home_result = st.columns([2, 2, 1])
             
             with col_download:
-                if st.button("📥 下載美學作品", use_container_width=True):
+                if st.button("📥 下載作品", use_container_width=True):
                     st.info("💡 右鍵點擊圖像保存到本地")
             
             with col_regen:
-                if st.button("🎭 重新美學生成", use_container_width=True):
-                    generate_flux_krea_main(prompt, preset, size)
+                if st.button(f"{selected_model['icon']} 重新生成", use_container_width=True):
+                    generate_flux_krea_main(selected_model, prompt, preset, size)
             
             with col_home_result:
                 show_home_button()
@@ -991,7 +1177,7 @@ def generate_flux_krea_main(prompt, preset, size):
         except Exception as e:
             st.error(f"圖像顯示錯誤: {safe_text(str(e))}")
     else:
-        st.error(f"❌ FLUX Krea 生成失敗: {result}")
+        st.error(f"❌ {selected_model['name']} 生成失敗: {result}")
         
         # 失敗時也顯示回到主頁
         col_error, col_home_error = st.columns([4, 1])
@@ -1093,9 +1279,10 @@ def init_koyeb_session():
         'providers_loaded': True,
         'koyeb_optimized': True,
         'cold_start_ready': True,
-        'flux_krea_optimized': True,
+        'flux_krea_models_loaded': True,
         'navyai_models_loaded': True,
-        'encoding_fixed': True
+        'encoding_fixed': True,
+        'model_selection_enabled': True
     }
 
 def init_session_state():
@@ -1119,7 +1306,7 @@ def show_koyeb_navyai_setup():
     with col_home:
         show_home_button()
     with col_title:
-        st.markdown("### ⚓ NavyAI 多模型設置 - Koyeb 優化")
+        st.markdown("### ⚓ NavyAI 15+ 模型設置 - Koyeb 優化")
     
     with st.form("koyeb_navyai_form"):
         st.info("🚀 配置 NavyAI 統一接口以訪問 15+ 專業圖像模型")
@@ -1137,21 +1324,28 @@ def show_koyeb_navyai_setup():
             help="密鑰格式：navy_xxxxxxxx"
         )
         
-        st.markdown("**🎨 可用模型預覽:**")
-        col1, col2, col3 = st.columns(3)
+        st.markdown("**🎨 NavyAI vs FLUX Krea 對比:**")
+        col1, col2 = st.columns(2)
         with col1:
+            st.markdown("**⚓ NavyAI (需密鑰)**")
             st.caption("🎭 FLUX Krea (3 種)")
             st.caption("🖼️ DALL-E (3 種)")
-        with col2:
             st.caption("🎯 Midjourney (3 種)")
             st.caption("⚡ FLUX AI (3 種)")
-        with col3:
             st.caption("🎨 Stable Diffusion (3 種)")
             st.caption("📊 **總計 15+ 模型**")
+        with col2:
+            st.markdown("**🎭 FLUX Krea (免費)**")
+            st.caption("🎭 FLUX Krea Dev")
+            st.caption("👑 FLUX Krea Pro")
+            st.caption("⚡ FLUX Krea Schnell")
+            st.caption("📸 FLUX Krea Realism")
+            st.caption("🎌 FLUX Krea Anime")
+            st.caption("🎨 FLUX Krea Artistic")
         
         col_submit, col_home_form = st.columns([3, 1])
         with col_submit:
-            submitted = st.form_submit_button("💾 保存並啟用多模型", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("💾 保存並啟用 NavyAI", type="primary", use_container_width=True)
         with col_home_form:
             if st.form_submit_button("🏠 返回主頁", use_container_width=True):
                 go_to_homepage()
@@ -1161,7 +1355,7 @@ def show_koyeb_navyai_setup():
             
             if key_id:
                 st.session_state.selected_provider = "NavyAI"
-                st.success("✅ NavyAI 多模型接口已配置並啟用")
+                st.success("✅ NavyAI 15+ 模型接口已配置並啟用")
                 st.info("⚓ 現在可以選擇使用 15+ 專業圖像模型")
                 time.sleep(2)
                 rerun_app()
@@ -1192,12 +1386,12 @@ def main():
         st.markdown(f"""
         <div style="text-align: center; color: #666; padding: 1rem;">
             <h4>🚀 Koyeb 高性能無服務器部署</h4>
-            <p><strong>🎭 FLUX Krea 美學專家</strong> | <strong>⚓ NavyAI 多模型統一</strong> | <strong>🌍 Global CDN</strong></p>
+            <p><strong>🎭 FLUX Krea 6種模型</strong> | <strong>⚓ NavyAI 15+ 模型</strong> | <strong>🌍 Global CDN</strong></p>
             <div style="margin-top: 0.5rem;">
                 <small>
                     運行環境: {'🌍 Koyeb Production' if KOYEB_ENV else '💻 Local Development'} | 
                     端口: {PORT} | 
-                    版本: FLUX Krea + NavyAI Models v3.1 (Encoding Fixed)
+                    版本: FLUX Krea 6 Models + NavyAI 15+ Models v4.0
                 </small>
             </div>
         </div>
