@@ -1,18 +1,7 @@
-# === 核心应用框架 ===
-streamlit==1.28.0
-requests==2.31.0
-pillow==10.0.0
-
-# === 系统工具 ===
-psutil==5.9.0
-httpx==0.24.1
-
-# === API 客户端 ===
-replicate==0.15.4
-openai==1.3.0
-cryptography==41.0.7
-aiohttp==3.8.0
-
-# === 数据处理 ===
-numpy==1.24.3
-validators==0.20.0
+# Flux AI 圖像生成器 - 修復版依賴
+streamlit>=1.28.0
+openai>=1.3.0
+requests>=2.31.0
+Pillow>=10.0.0
+psutil>=5.9.0
+python-dotenv>=1.0.0
