@@ -13,9 +13,9 @@ scaling:
   max: 3
   targets:
     - type: cpu
-      value: "70"
+      value: "100"
     - type: memory
-      value: "80"
+      value: "100"
 ports:
   - port: 8000
     protocol: http
