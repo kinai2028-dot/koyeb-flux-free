@@ -1,7 +1,16 @@
-# Flux AI 圖像生成器 - 修復版依賴
-streamlit>=1.28.0
-openai>=1.3.0
-requests>=2.31.0
-Pillow>=10.0.0
-psutil>=5.9.0
-python-dotenv>=1.0.0
+streamlit
+openai
+Pillow
+requests
+diffusers
+torch
+transformers
+accelerate
+einops
+safetensors
+sentencepiece
+tokenizers
+protobuf
+peft
+invisible-watermark
+
